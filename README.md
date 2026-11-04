@@ -312,6 +312,32 @@ A check's `when` predicate takes the distro attr and returns whether the check
 applies to that distro. `tools` names commands the check needs, resolved like an
 install's packages; `optional` turns a missing tool into a skip.
 
+### Stage environment
+
+Every check script (and `test`) runs with two environment variables set, so a
+stage never hard-codes where things landed:
+
+| Variable | Value |
+| --- | --- |
+| `MAYFLY_DISTRO` | the distro's attr (`ubuntu-2404`, `fedora-44`, ...) |
+| `MAYFLY_BINARY` | the installed binary's guest path (absent when no binary was installed) |
+
+This lets your test logic live in one place, your own `justfile`, so a check is a
+one-line shim that runs the shipped binary the same way you do locally:
+
+```nix
+install = { binary = ./mytool; packages = [ "just" ]; };  # just, so the recipe runs in-guest
+test = ./check.sh;
+```
+
+```sh
+# check.sh: the one place test logic lives is the justfile
+exec just mayfly-check "$MAYFLY_BINARY"
+```
+
+`just` is shown, never required: a check can do its own assertions directly.
+mayfly only sets the variables.
+
 ### mkMatrix returns
 
 ```nix

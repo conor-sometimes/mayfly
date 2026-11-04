@@ -436,13 +436,31 @@ func (c *checker) provision() error {
 	return nil
 }
 
+// installDst is where a subject's binary lands: its explicit installPath, or
+// /usr/local/bin/<name> (on PATH) by default. Exported to stage commands via
+// $MAYFLY_BINARY, so a check never hard-codes the path.
+func installDst(s report.Subject) string {
+	if s.InstallPath != "" {
+		return s.InstallPath
+	}
+	return "/usr/local/bin/" + s.Name
+}
+
+// installedBinary is the guest path of the thing under test, for $MAYFLY_BINARY.
+// The first install that ships a binary wins (the common case is one); "" when
+// no binary was installed (a packages-only or distro-only run).
+func (c *checker) installedBinary() string {
+	for _, s := range c.cfg.Subjects {
+		if s.Binary != "" {
+			return installDst(s)
+		}
+	}
+	return ""
+}
+
 func (c *checker) provisionSubject(s report.Subject) error {
 	if s.Binary != "" {
-		dst := s.InstallPath
-		if dst == "" {
-			dst = "/usr/local/bin/" + s.Name
-		}
-		if err := copyFile(c.src(s.Binary), dst, 0o755); err != nil {
+		if err := copyFile(c.src(s.Binary), installDst(s), 0o755); err != nil {
 			return err
 		}
 	}
@@ -774,6 +792,13 @@ func (c *checker) shPID(timeout time.Duration, name string, args ...string) (str
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = c.workDir
 	cmd.Env = os.Environ()
+	// A check script can name the distro and run the shipped binary without
+	// hard-coding either: $MAYFLY_DISTRO is this distro's attr, $MAYFLY_BINARY the
+	// installed binary's guest path (absent when no binary was installed).
+	cmd.Env = append(cmd.Env, "MAYFLY_DISTRO="+c.cfg.Distro)
+	if b := c.installedBinary(); b != "" {
+		cmd.Env = append(cmd.Env, "MAYFLY_BINARY="+b)
+	}
 	if c.cfg.Proxy != "" {
 		for _, k := range []string{"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"} {
 			cmd.Env = append(cmd.Env, k+"="+c.cfg.Proxy)

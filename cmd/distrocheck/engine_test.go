@@ -86,6 +86,33 @@ func TestCheckTools(t *testing.T) {
 	}
 }
 
+// TestInstallDst: a binary lands at its explicit installPath, else on PATH at
+// /usr/local/bin/<name>.
+func TestInstallDst(t *testing.T) {
+	if got := installDst(report.Subject{Name: "mytool"}); got != "/usr/local/bin/mytool" {
+		t.Errorf("default dst = %q, want /usr/local/bin/mytool", got)
+	}
+	if got := installDst(report.Subject{Name: "mytool", InstallPath: "/opt/x/mytool"}); got != "/opt/x/mytool" {
+		t.Errorf("explicit dst = %q, want /opt/x/mytool", got)
+	}
+}
+
+// TestInstalledBinary: $MAYFLY_BINARY is the first install that ships a binary,
+// and "" when none does.
+func TestInstalledBinary(t *testing.T) {
+	c := chk(report.Config{Subjects: []report.Subject{
+		{Name: "a"}, // no binary, skipped
+		{Name: "b", Binary: "subjects/b/bin"},
+		{Name: "c", Binary: "subjects/c/bin", InstallPath: "/opt/c"},
+	}})
+	if got := c.installedBinary(); got != "/usr/local/bin/b" {
+		t.Errorf("installedBinary = %q, want /usr/local/bin/b", got)
+	}
+	if got := chk(report.Config{Subjects: []report.Subject{{Name: "a"}}}).installedBinary(); got != "" {
+		t.Errorf("no-binary installedBinary = %q, want empty", got)
+	}
+}
+
 // TestDedup: dedup removes repeats and sorts.
 func TestDedup(t *testing.T) {
 	got := dedup([]string{"b", "a", "b", "c", "a"})
