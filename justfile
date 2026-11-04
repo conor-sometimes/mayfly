@@ -39,6 +39,11 @@ fuzz N='50000x':
     echo "=== matrix FuzzLastReport ({{N}}) ==="
     go test -run='^$' -fuzz='^FuzzLastReport$' -fuzztime={{N}} ./cmd/matrix
 
+# e2e: a failing test still tears the VM down (the teardown trap's other branch).
+# Needs KVM.
+e2e-teardown:
+    bash tests/e2e-teardown.sh "$PWD"
+
 # Flake-rate soak: boot + install + test + teardown the smoke matrix R times and
 # report the pass rate. This MEASURES flakiness (not a CI gate - a soak that must
 # be 100% green every run is itself flake-sensitive). Needs KVM. Run on a quiet
