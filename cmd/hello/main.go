@@ -6,5 +6,5 @@ package main
 import "fmt"
 
 func main() {
-	fmt.Println("distro-matrix hello")
+	fmt.Println("mayfly hello")
 }

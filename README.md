@@ -1,7 +1,10 @@
-# distro-matrix
+# mayfly
 
 Boot N real Linux distros under KVM, run your checks on each, tear every VM
 down. One command.
+
+Like the insect: each VM is born at spin-up, lives for exactly one test run, and
+is gone at teardown. No VM outlives its run, no overlay is left behind.
 
 ```sh
 nix run .#matrix              # every enabled distro, every check
@@ -53,22 +56,29 @@ Two audiences use the same repo:
 
 Write one file, run one command, watch the matrix.
 
-Put a `distro-matrix.toml` in your project. It describes the whole run: which
-distros, what to install, what to copy, and the test to run. TOML, so a non-Nix
-user can write it.
+Put a `mayfly.nix` in your project. It is a mayfly module: you set the options,
+and they are type-checked against the schema (a wrong field fails at eval with a
+clear message).
 
-```toml
-# distro-matrix.toml
-distros = ["ubuntu-2404", "fedora-44", "debian-13"]
-
-binary = "./mytool"                     # installed onto PATH in each guest
-packages = ["curl"]                     # installed first, per distro
-unit = "./mytool.service"               # installed, enabled and started
-
-[files]
-"/etc/mytool/config.yml" = "./config.yml"
-
-test = "./check.sh"                     # run in-guest after the subject is up
+```nix
+# mayfly.nix
+{ ... }:
+{
+  mayfly = {
+    distros = {
+      ubuntu-2404.enable = true;
+      fedora-44.enable = true;
+      debian-13.enable = true;
+    };
+    subject = {
+      binary = ./mytool;                         # installed onto PATH in each guest
+      packages = [ "curl" ];                     # installed first, per distro
+      unit = ./mytool.service;                   # installed, enabled and started
+      files = { "/etc/mytool/config.yml" = ./config.yml; };
+    };
+    test = ./check.sh;                           # run in-guest after the subject is up
+  };
+}
 ```
 
 ```sh
@@ -81,21 +91,29 @@ echo ok
 Then, from that directory:
 
 ```sh
-nix run github:conor-sometimes/distro-matrix        # finds ./distro-matrix.toml
-nix run github:conor-sometimes/distro-matrix -- -f other.toml
+nix run github:conor-sometimes/mayfly        # reads ./mayfly.nix
 ```
 
-Installed, it is just `distro-matrix`. Each distro either goes green or tells
-you exactly which phase broke and why. A runnable sample is in
+Installed, it is just `mayfly`. Each distro either goes green or tells you
+exactly which phase broke and why. A runnable sample is in
 [`examples/quickstart/`](./examples/quickstart/).
 
-### The same run, Nix-native
+### No file at all
 
-For a project whose binary is already a flake output, write the same fields as
-a `mkMatrix` call and run it as `nix run .#matrix`. The TOML is sugar over this.
+For a one-off with no `mayfly.nix`, pass the same fields as flags:
+
+```sh
+nix run github:conor-sometimes/mayfly -- \
+  -binary ./mytool -unit ./mytool.service -test ./check.sh -distro ubuntu-2404
+```
+
+### Wired into your own flake
+
+For a project whose binary is already a flake output, call `mkMatrix` (sugar for
+a one-module run) and splice its apps into your flake:
 
 ```nix
-distro-matrix.lib.mkMatrix {
+mayfly.lib.mkMatrix {
   inherit pkgs;
   distros = { ubuntu-2404.enable = true; fedora-44.enable = true; };
   subject = {
@@ -276,36 +294,46 @@ subject's packages; `optional` turns a missing tool into a skip.
 
 Splice `apps` and `checks` into your own flake with `//`.
 
-## How it works
+### Options reference
 
-Every distro goes through the same lifecycle. The base image is never written.
+The full option set (distros, subject, subjects, test, checks, parallelism,
+teardown, timeouts, ssh user) is declared in `lib/module.nix` and type-checked
+at eval. The reference is generated from that schema, so it never drifts:
 
-```mermaid
-flowchart LR
-  Base[Pinned image] -->|qemu-img -b| Overlay
-  Overlay -->|qemu -enable-kvm| Boot
-  Boot -->|cloud-init, ssh key| Ready
-  Ready -->|scp binary, unit, files| Provision
-  Provision -->|run test or oracle| Test
-  Test -->|report on ssh stdout| Teardown
-  Teardown -->|kill qemu, rm overlay| Done
+```sh
+nix build .#options-doc && cat result   # Markdown of every mayfly.* option
 ```
 
-- Spin up. The pinned image sits read-only in the Nix store, fetched by the
-  vendor's checksum, so a moved or tampered image never boots. The runner makes
-  a copy-on-write overlay and boots it with KVM. A NoCloud seed ISO carries a
-  per-run SSH key and a `matrix` sudo user. The key dies with the run.
-- Ready. The runner polls SSH with backoff, then waits for `cloud-init status
-  --wait`. A guest that never comes up hits a timeout with a clear, distro-named
-  error and the serial-console tail, not a silent hang.
-- Provision. The subject's packages install via the distro's own package
-  manager (with retry on a transient mirror failure). The binary, units and
-  files are scp'd in. Units are enabled and started.
-- Test. The in-guest oracle (`distrocheck`, itself a static binary) runs the
-  checks and prints the report on SSH stdout.
-- Teardown. A trap kills QEMU and removes the overlay, on success, failure or
-  Ctrl-C. Two layers: the runner itself, and the app wrapper's shell trap in
-  case the runner is killed outright. No leaked VMs, no leaked disk.
+## How it works
+
+Every distro goes through the same five-stage lifecycle. The base image is
+never written.
+
+```mermaid
+flowchart TD
+  Boot --> Provision
+  Provision --> Test
+  Test --> Report
+  Report --> Teardown
+```
+
+1. Boot. The pinned image sits read-only in the Nix store, fetched by the
+   vendor's checksum, so a moved or tampered image never boots. The runner makes
+   a copy-on-write overlay and boots it with KVM. A NoCloud seed ISO carries a
+   per-run SSH key and a sudo user; the key dies with the run. The runner polls
+   SSH with backoff, then waits for `cloud-init status --wait`. A guest that
+   never comes up hits a timeout with a clear, distro-named error and the
+   serial-console tail, not a silent hang.
+2. Provision. The subject's packages install via the distro's own package
+   manager (with retry on a transient mirror failure). The binary, units and
+   files are scp'd in, and the units are enabled and started.
+3. Test. The in-guest oracle (`distrocheck`, itself a static binary) runs the
+   checks.
+4. Report. The oracle prints the per-check verdicts on SSH stdout; a guest that
+   dies mid-run still reports how far it got.
+5. Teardown. A trap kills QEMU and removes the overlay, on success, failure or
+   Ctrl-C. Two layers: the runner itself, and the app wrapper's shell trap in
+   case the runner is killed outright. No leaked VMs, no leaked disk.
 
 Each distro is its own VM, its own forwarded port, its own result. One distro
 failing or flaking never affects another.
@@ -334,17 +362,18 @@ wall-clock races.
 
 ## Three ways to use it
 
-- Way 1: a `distro-matrix.toml`, no Nix file. The headline path above. Bare
-  `nix run github:conor-sometimes/distro-matrix` finds `./distro-matrix.toml`.
-  As an inline fallback, the same fields are flags:
+- Way 1: a `mayfly.nix`, run in place. The headline path above. Bare
+  `nix run github:conor-sometimes/mayfly` reads `./mayfly.nix`. For a one-off
+  with no file, the same fields are flags:
 
   ```sh
-  nix run github:conor-sometimes/distro-matrix -- \
+  nix run github:conor-sometimes/mayfly -- \
     -binary ./foo -unit ./foo.service -test ./smoke.sh -distro ubuntu-2404
   ```
 
-- Way 2: a flake input. Call `lib.mkMatrix` from your own flake (the Nix-native
-  example). You get the matrix inside your own `nix run` and `nix flake check`.
+- Way 2: a flake input. Call `lib.mkMatrix` (or set `mayfly.*` with
+  `lib.buildFromModules`) from your own flake. You get the matrix inside your own
+  `nix run` and `nix flake check`.
 - Way 3: a CI step. The same command on a KVM-capable runner. One distro fits a
   standard hosted runner; the full matrix runs on a bigger box. See
   `.github/workflows/ci.yml`.

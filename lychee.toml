@@ -6,4 +6,4 @@ timeout = 30
 max_retries = 2
 retry_wait_time = 5
 accept = [200, 206, 301, 302, 307, 308, 429]
-user_agent = "curl/8.0 distro-matrix-lychee"
+user_agent = "curl/8.0 mayfly-lychee"

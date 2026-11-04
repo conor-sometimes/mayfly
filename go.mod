@@ -1,5 +1,3 @@
-module github.com/conor-sometimes/distro-matrix
+module github.com/conor-sometimes/mayfly
 
 go 1.26.10
-
-require github.com/BurntSushi/toml v1.6.0

@@ -1,37 +1,40 @@
-# mkMatrix: the one function that turns a declarative description into a running
-# matrix. A consumer flips distros on from the catalog, points at a subject and
-# a test, and gets back apps and checks to splice into its own flake.
+# buildMatrix turns an evaluated mayfly config into a running matrix: apps to
+# run it, per-distro KVM checks, the generated distro table, and the manifest
+# the host runner consumes. lib/default.nix evalModules the user's mayfly.nix
+# (or flake options) against lib/module.nix and hands the result here.
 #
-#   distro-matrix.lib.mkMatrix {
-#     inherit pkgs;
-#     distros = { ubuntu-2404.enable = true; };
-#     subject = { binary = "${pkg}/bin/foo"; unit = ./foo.service; };
-#     test = ./check.sh;                 # exit 0 is a pass
-#   }
-#
-# matrixSrc and catalogSet are baked in by the flake; a consumer passes only the
-# declarative bits.
+# matrixSrc and catalogSet are baked in by the flake; cfg is config.mayfly.
 { pkgs
 , lib ? pkgs.lib
 , matrixSrc
 , catalogSet
-, # --- the consumer's declaration ---
-  distros ? { }
-, subject ? null
-, subjects ? { }
-, test ? null
-, checks ? { }
+, cfg
 }:
 let
-  # --- resolve distros: catalog-enable plus any custom entry ---
-  enabledNames = lib.filterAttrs (name: _: (distros.${name} or { }).enable or false) catalogSet;
-  fromCatalog = lib.mapAttrs
-    (name: entry: entry // (removeAttrs (distros.${name} or { }) [ "enable" ]) // { inherit name; })
-    enabledNames;
-  custom = lib.mapAttrs (name: v: v // { inherit name; })
-    (lib.filterAttrs (name: v: !(catalogSet ? ${name}) && (v ? image)) distros);
-  resolved = fromCatalog // custom;
+  # --- resolve distros: catalog-enable (merge the shipped entry), plus custom ---
+  enabled = lib.filterAttrs (_: d: d.enable) cfg.distros;
+  resolveOne = name: d:
+    if catalogSet ? ${name} then
+      let c = catalogSet.${name}; in
+      {
+        inherit name;
+        title = if d.title != name then d.title else (c.title or name);
+        inherit (c) pm image;
+        family = c.family or "";
+        packages = (c.packages or { }) // d.packages;
+        inherit (d) boot;
+      }
+    else if d.image != null && d.pm != null then
+      { inherit name; inherit (d) title pm family image packages boot; }
+    else
+      throw "mayfly: distro '${name}' is not in the catalog, so it needs `image` and `pm` set";
+  resolved = lib.mapAttrs resolveOne enabled;
   distroList = lib.attrValues resolved;
+
+  subject = cfg.subject;
+  subjects = cfg.subjects;
+  test = cfg.test;
+  checks = cfg.checks;
 
   imageOf = d:
     if d.image ? drv then d.image.drv pkgs
@@ -44,7 +47,7 @@ let
 
   # --- the Go binaries: distrocheck (guest) and matrix (host), static ---
   tools = pkgs.buildGoModule {
-    pname = "distro-matrix";
+    pname = "mayfly";
     version = "0.1.0";
     src = matrixSrc;
     vendorHash = null; # no external modules
@@ -56,8 +59,10 @@ let
   # --- lay out one subject's files at stable payload paths, and the manifest shape it maps to ---
   subjectModel = name: s:
     let
-      unitFiles = (s.units or [ ]) ++ (lib.optional (s ? unit) s.unit);
-      units = lib.imap0 (i: u: { rel = "subjects/${name}/unit${toString i}-${baseNameOf u}"; src = u; }) unitFiles;
+      unitFiles = (s.units or [ ]) ++ (lib.optional (s.unit or null != null) s.unit);
+      # Keep the original unit filename (banken.service), under a per-subject
+      # units/ dir to avoid collisions: the installed unit name is this basename.
+      units = map (u: { rel = "subjects/${name}/units/${baseNameOf u}"; src = u; }) unitFiles;
       fileList = lib.imap0 (i: kv: { inherit (kv) name; guest = kv.name; src = kv.value; rel = "subjects/${name}/file${toString i}"; })
         (lib.attrsToList (s.files or { }));
       hasBinary = s ? binary && s.binary != null;
@@ -76,7 +81,7 @@ let
         units = map (u: u.rel) units;
         files = lib.listToAttrs (map (f: { name = f.guest; value = f.rel; }) fileList);
         setup = if hasSetup then "subjects/${name}/setup" else "";
-        enable = s.enable or (map (u: baseNameOf u) unitFiles);
+        enable = (lib.optionals (s.start or true) (map baseNameOf unitFiles)) ++ (s.enable or [ ]);
         packages = s.packages or [ ];
         ocsf = s.ocsf or "";
         scan = s.scan or [ ];
@@ -108,7 +113,7 @@ let
     ++ lib.concatLists (lib.mapAttrsToList (_: m: m.copies) checkModels);
 
   # --- the payload: distrocheck plus every source file, at the paths above ---
-  payload = pkgs.runCommand "distro-matrix-payload" { } (''
+  payload = pkgs.runCommand "mayfly-payload" { } (''
     mkdir -p $out
     install -Dm755 ${tools}/bin/distrocheck $out/distrocheck
   '' + lib.concatMapStrings
@@ -139,21 +144,31 @@ let
       })
       distroList;
   };
-  manifestFile = pkgs.writeText "distro-matrix-manifest.json" (builtins.toJSON manifest);
+  manifestFile = pkgs.writeText "mayfly-manifest.json" (builtins.toJSON manifest);
 
   # --- the app: the host runner, wrapped with its tools and a backstop trap ---
   runtime = [ pkgs.qemu pkgs.xorriso pkgs.openssh pkgs.coreutils ];
+  # Defaulted options become flags; a user flag after them still wins.
+  cfgArgs = lib.concatStringsSep " " (
+    lib.optional (cfg.parallel > 0) "-parallel ${toString cfg.parallel}"
+    ++ lib.optional cfg.keepWorkDir "-keep"
+    ++ [
+      "-boot-timeout ${cfg.timeouts.boot}"
+      "-ssh-timeout ${cfg.timeouts.ssh}"
+      "-cloud-init-timeout ${cfg.timeouts.cloudInit}"
+    ]
+  );
   mkApp = extraArgs: pkgs.writeShellApplication {
-    name = "distro-matrix";
+    name = "mayfly";
     runtimeInputs = runtime;
     text = ''
-      run_dir="$(mktemp -d "''${XDG_RUNTIME_DIR:-/tmp}/distro-matrix.XXXXXX")"
-      export DISTRO_MATRIX_RUN_DIR="$run_dir"
+      run_dir="$(mktemp -d "''${XDG_RUNTIME_DIR:-/tmp}/mayfly.XXXXXX")"
+      export MAYFLY_RUN_DIR="$run_dir"
       # Backstop teardown: if the runner is killed outright, this still kills the
       # VM process group and removes this run's overlays. The runner removes each
       # work dir itself on a clean exit; this is the belt-and-braces layer.
       trap 'kill -- -$$ 2>/dev/null || true; rm -rf "$run_dir" 2>/dev/null || true' EXIT INT TERM
-      exec ${tools}/bin/matrix -manifest ${manifestFile} ${extraArgs} "$@"
+      exec ${tools}/bin/matrix -manifest ${manifestFile} ${cfgArgs} ${extraArgs} "$@"
     '';
   };
 
@@ -173,7 +188,7 @@ let
     | Distro | Attr | Package manager | Family |
     | --- | --- | --- | --- |
     ${tableRows}'';
-  readme = pkgs.writeText "distro-matrix-table.md" readmeTable;
+  readme = pkgs.writeText "mayfly-table.md" readmeTable;
 in
 {
   apps = {
@@ -191,12 +206,12 @@ in
           __noChroot = true;
           nativeBuildInputs = runtime;
         } ''
-        export DISTRO_MATRIX_RUN_DIR="$(mktemp -d)"
+        export MAYFLY_RUN_DIR="$(mktemp -d)"
         ${tools}/bin/matrix -manifest ${manifestFile} -distro ${d.name} | tee "$out"
       '';
     })
     distroList);
 
-  inherit readme manifest;
+  inherit readme manifest manifestFile;
   readmeText = readmeTable;
 }

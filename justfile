@@ -1,4 +1,4 @@
-# distro-matrix tasks. `just` with no target lists them.
+# mayfly tasks. `just` with no target lists them.
 
 default:
     @just --list

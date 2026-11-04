@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/conor-sometimes/distro-matrix/internal/oracle"
-	"github.com/conor-sometimes/distro-matrix/internal/report"
+	"github.com/conor-sometimes/mayfly/internal/oracle"
+	"github.com/conor-sometimes/mayfly/internal/report"
 )
 
 const (
@@ -824,7 +824,7 @@ func dropTaskNever(glob string) ([]string, error) {
 		for i, l := range lines {
 			if oracle.TaskNever.MatchString(l) {
 				removed = append(removed, strings.TrimSpace(l))
-				lines[i] = "# removed by distro-matrix (turns syscall auditing off): " + l
+				lines[i] = "# removed by mayfly (turns syscall auditing off): " + l
 			}
 		}
 		return strings.Join(lines, "\n")

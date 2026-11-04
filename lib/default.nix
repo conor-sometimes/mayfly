@@ -1,14 +1,41 @@
-# The repo's library: mkMatrix (the engine) and fetchRelease (an upstream static
-# release by hash, for the worked examples). matrixSrc and catalogSet are baked
-# in by the flake so a consumer calls mkMatrix with only its own declaration.
+# The repo's library. A mayfly run is a module: lib/module.nix declares the
+# options, evalModules type-checks the user's config, and lib/mkMatrix.nix builds
+# the matrix from it. matrixSrc and catalogSet are baked in by the flake.
 { lib, matrixSrc, catalogSet }:
-{
-  # mkMatrix { pkgs; distros; subject|subjects; test|checks; } -> { apps; checks; readme; }
-  mkMatrix = args: import ./mkMatrix.nix ({ inherit lib matrixSrc catalogSet; } // args);
+let
+  evalCfg = { pkgs, modules, specialArgs ? { } }:
+    lib.evalModules {
+      specialArgs = { inherit catalogSet pkgs; } // specialArgs;
+      modules = [ ./module.nix ] ++ modules;
+    };
+
+  build = pkgs: eval:
+    (import ./mkMatrix.nix {
+      inherit pkgs lib matrixSrc catalogSet;
+      cfg = eval.config.mayfly;
+    }) // { inherit eval; };
+in
+rec {
+  # buildFromModules { pkgs; modules; } evaluates mayfly modules (a mayfly.nix is
+  # one such module) and builds the matrix. The default app uses it on the cwd.
+  buildFromModules = { pkgs, modules, specialArgs ? { } }:
+    build pkgs (evalCfg { inherit pkgs modules specialArgs; });
+
+  # mkMatrix { pkgs; distros; subject; test; checks; ... } -> { apps; checks;
+  # readme; manifestFile; eval; }. The attrset is sugar for a one-module run.
+  mkMatrix = { pkgs, ... }@args:
+    buildFromModules {
+      inherit pkgs;
+      modules = [ { mayfly = removeAttrs args [ "pkgs" "lib" ]; } ];
+    };
+
+  # The options schema, for a consumer that wants to set mayfly.* in their own
+  # module system, and for generating the options reference.
+  mayflyModule = ./module.nix;
+  inherit evalCfg;
 
   # fetchRelease unpacks a project's own release archive and returns the path of
-  # one binary inside it, so an example tests the bytes the project ships, not a
-  # nixpkgs rebuild. The matrix's static assertion still runs on it.
+  # one binary inside it, so an example tests the bytes the project ships.
   #
   #   lib.fetchRelease pkgs { url = "...tar.gz"; sha256 = "..."; bin = "caddy"; }
   fetchRelease = pkgs: { url, sha256, bin }:

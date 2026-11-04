@@ -37,8 +37,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BurntSushi/toml"
-	"github.com/conor-sometimes/distro-matrix/internal/report"
+	"github.com/conor-sometimes/mayfly/internal/report"
 )
 
 // Distro is one bootable image plus the per-distro knowledge the guest needs.
@@ -80,8 +79,7 @@ const (
 var (
 	manifestPath = flag.String("manifest", "", "JSON manifest of distros, subjects, checks and the payload dir (the pure Nix path)")
 	catalogPath  = flag.String("catalog", "", "JSON array of distros with store images (baked into the default app)")
-	tomlPath     = flag.String("f", "", "a distro-matrix.toml describing the run (default: ./distro-matrix.toml)")
-	distrocheck  = flag.String("distrocheck", "", "store path to the distrocheck binary (for the TOML and flag paths)")
+	distrocheck  = flag.String("distrocheck", "", "store path to the distrocheck binary (for the CLI-flag path)")
 	payloadFlag  = flag.String("payload", "", "payload dir holding distrocheck (defaults to the manifest's)")
 	parallel     = flag.Int("parallel", 0, "max distros booted at once (0 = bound by host CPU and RAM)")
 	keep         = flag.Bool("keep", false, "keep each VM's work dir and print where, pass or fail")
@@ -122,7 +120,7 @@ func main() {
 }
 
 // loadManifest builds the run manifest from -manifest (the pure Nix path), or
-// assembles one from a distro-matrix.toml or the CLI flags against -catalog.
+// assembles one from the CLI flags against -catalog (the no-Nix path).
 func loadManifest() (Manifest, error) {
 	if *manifestPath != "" {
 		var m Manifest
@@ -148,45 +146,32 @@ func loadManifest() (Manifest, error) {
 	return assembleImpure()
 }
 
-// tomlRun is the distro-matrix.toml schema: the whole run in one approachable
-// file. The Nix mkMatrix form expresses the same fields.
-type tomlRun struct {
-	Distros     []string          `toml:"distros"`
-	Name        string            `toml:"name"`
-	Binary      string            `toml:"binary"`
-	InstallPath string            `toml:"install_path"`
-	Packages    []string          `toml:"packages"`
-	Unit        string            `toml:"unit"`
-	Units       []string          `toml:"units"`
-	Enable      []string          `toml:"enable"`
-	Files       map[string]string `toml:"files"`
-	Setup       string            `toml:"setup"`
-	OCSF        string            `toml:"ocsf"`
-	Scan        []string          `toml:"scan"`
-	Test        string            `toml:"test"`
-	Checks      []tomlCheck       `toml:"checks"`
+// runSpec is one subject and its checks, assembled from the CLI flags (the
+// no-Nix one-off path). The mayfly.nix module expresses the same fields, typed.
+type runSpec struct {
+	Distros     []string
+	Name        string
+	Binary      string
+	InstallPath string
+	Packages    []string
+	Unit        string
+	Units       []string
+	Enable      []string
+	Files       map[string]string
+	Setup       string
+	OCSF        string
+	Scan        []string
+	Test        string
 }
 
-type tomlCheck struct {
-	ID       string   `toml:"id"`
-	Kind     string   `toml:"kind"`
-	Run      string   `toml:"run"`
-	As       string   `toml:"as"`
-	Expect   []string `toml:"expect"`
-	IDs      []string `toml:"ids"`
-	Unit     string   `toml:"unit"`
-	Match    string   `toml:"match"`
-	Tools    []string `toml:"tools"`
-	Optional bool     `toml:"optional"`
-}
-
-// assembleImpure builds the manifest for the TOML path (the headline) or the
-// flag fallback. Source files come from the working directory, not the store,
-// so it stages them (and distrocheck) into a payload dir the guest reads.
+// assembleImpure builds the manifest for the CLI-flag path: a subject and a test
+// from the working directory, staged (with distrocheck) into a payload dir the
+// guest reads. The Nix-native path builds a manifest in the store instead and
+// the runner takes it through -manifest.
 func assembleImpure() (Manifest, error) {
 	var m Manifest
 	if *catalogPath == "" {
-		return m, fmt.Errorf("no -manifest and no -catalog; run through the distro-matrix app")
+		return m, fmt.Errorf("no -manifest and no -catalog; run through the mayfly app")
 	}
 	data, err := os.ReadFile(*catalogPath)
 	if err != nil {
@@ -234,8 +219,10 @@ func assembleImpure() (Manifest, error) {
 	if run.Unit != "" {
 		units = append(units, run.Unit)
 	}
-	for i, u := range units {
-		rel := fmt.Sprintf("subjects/%s/unit%d-%s", name, i, filepath.Base(u))
+	for _, u := range units {
+		// Keep the original unit name, under a per-subject units/ dir: the guest
+		// installs it as this basename, so `systemctl start <unit>` finds it.
+		rel := fmt.Sprintf("subjects/%s/units/%s", name, filepath.Base(u))
 		if err := stage(u, rel); err != nil {
 			return m, fmt.Errorf("stage unit %s: %w", u, err)
 		}
@@ -269,63 +256,35 @@ func assembleImpure() (Manifest, error) {
 		}
 		m.Checks = append(m.Checks, report.CheckSpec{ID: "test", Kind: "exit", Run: rel})
 	}
-	for _, c := range run.Checks {
-		spec := report.CheckSpec{
-			ID: c.ID, Kind: c.Kind, As: c.As, Expect: c.Expect, IDs: c.IDs,
-			Unit: c.Unit, Match: c.Match, Tools: c.Tools, Optional: c.Optional,
-		}
-		if c.Run != "" {
-			rel := "checks/" + c.ID + "/run"
-			if err := stage(c.Run, rel); err != nil {
-				return m, fmt.Errorf("stage check %s: %w", c.ID, err)
-			}
-			spec.Run = rel
-		}
-		m.Checks = append(m.Checks, spec)
-	}
 
-	// Distro selection: the toml's `distros`, or -distro flags, over the catalog.
 	want := run.Distros
 	if len(distroFilter) > 0 {
 		want = distroFilter
 	}
 	m.Distros = filterDistros(m.Distros, want)
 	if len(m.Distros) == 0 {
-		return m, fmt.Errorf("no distros selected; name catalog distros in `distros = [...]` or with -distro")
+		return m, fmt.Errorf("no distros selected; name catalog distros with -distro")
 	}
 	return m, nil
 }
 
-// loadRun reads the run spec from -f, else the flag fallback, else the default
-// ./distro-matrix.toml.
-func loadRun() (tomlRun, error) {
-	var run tomlRun
-	flagMode := *binary != "" || *test != "" || len(unitList) > 0 || len(fileList) > 0
-	switch {
-	case *tomlPath != "":
-		if _, err := toml.DecodeFile(*tomlPath, &run); err != nil {
-			return run, fmt.Errorf("parse %s: %w", *tomlPath, err)
+// loadRun assembles the run spec from the CLI flags. Structured detect checks
+// are the Nix-native (mayfly.nix module) path, not the flag path; the flag path
+// is a static binary and a pass/fail test.
+func loadRun() (runSpec, error) {
+	if *binary == "" && *test == "" && len(unitList) == 0 && len(fileList) == 0 {
+		return runSpec{}, fmt.Errorf("no -manifest and no subject flags; write a mayfly.nix or pass -binary/-test (see the README)")
+	}
+	run := runSpec{
+		Name: *subjectName, Binary: *binary, InstallPath: *installPath,
+		Packages: pkgList, Units: unitList, Enable: enableList, Test: *test, Files: map[string]string{},
+	}
+	for _, f := range fileList {
+		guest, src, ok := strings.Cut(f, "=")
+		if !ok {
+			return run, fmt.Errorf("-file wants guest=source, got %q", f)
 		}
-	case flagMode:
-		run = tomlRun{
-			Name: *subjectName, Binary: *binary, InstallPath: *installPath,
-			Packages: pkgList, Units: unitList, Enable: enableList, Test: *test, Files: map[string]string{},
-		}
-		for _, f := range fileList {
-			guest, src, ok := strings.Cut(f, "=")
-			if !ok {
-				return run, fmt.Errorf("-file wants guest=source, got %q", f)
-			}
-			run.Files[guest] = src
-		}
-	default:
-		const def = "distro-matrix.toml"
-		if _, err := os.Stat(def); err != nil {
-			return run, fmt.Errorf("no ./distro-matrix.toml (and no -f or -binary); see the README quick start")
-		}
-		if _, err := toml.DecodeFile(def, &run); err != nil {
-			return run, fmt.Errorf("parse %s: %w", def, err)
-		}
+		run.Files[guest] = src
 	}
 	return run, nil
 }
@@ -784,11 +743,11 @@ func requireKVM() error {
 }
 
 // runRoot is the per-invocation work dir. The app wrapper creates one and names
-// it in DISTRO_MATRIX_RUN_DIR so its EXIT trap removes exactly this run's VMs
+// it in MAYFLY_RUN_DIR so its EXIT trap removes exactly this run's VMs
 // and overlays, never a concurrent invocation's. Absent (a bare binary run), it
 // falls back to a fresh dir under the runtime dir.
 func runRoot() string {
-	if d := os.Getenv("DISTRO_MATRIX_RUN_DIR"); d != "" {
+	if d := os.Getenv("MAYFLY_RUN_DIR"); d != "" {
 		_ = os.MkdirAll(d, 0o755)
 		return d
 	}
@@ -796,7 +755,7 @@ func runRoot() string {
 	if base == "" {
 		base = os.TempDir()
 	}
-	root := filepath.Join(base, "distro-matrix")
+	root := filepath.Join(base, "mayfly")
 	_ = os.MkdirAll(root, 0o755)
 	return root
 }

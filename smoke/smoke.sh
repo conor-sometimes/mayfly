@@ -9,7 +9,7 @@ if ! command -v hello >/dev/null 2>&1; then
 fi
 
 out="$(hello)"
-if [ "$out" != "distro-matrix hello" ]; then
+if [ "$out" != "mayfly hello" ]; then
   echo "hello printed: $out"
   exit 1
 fi

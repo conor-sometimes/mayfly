@@ -1,5 +1,5 @@
 {
-  description = "distro-matrix: boot N real Linux distros under KVM, run your checks on each, tear every VM down";
+  description = "mayfly: boot N real Linux distros under KVM, run your checks on each, tear every VM down";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -15,7 +15,7 @@
 
       # The host runner and in-guest oracle, built once for the default app.
       toolsPkg = pkgs.buildGoModule {
-        pname = "distro-matrix";
+        pname = "mayfly";
         version = "0.1.0";
         src = self;
         vendorHash = null;
@@ -25,11 +25,11 @@
       };
 
       # The full catalog as a JSON manifest with store images, baked into the
-      # default app so a distro-matrix.toml can name any catalog distro.
+      # default app so the CLI-flag path can name any catalog distro.
       imageOf = d:
         pkgs.fetchurl ({ inherit (d.image) url; }
           // (if d.image ? sha512 then { inherit (d.image) sha512; } else { inherit (d.image) sha256; }));
-      catalogManifest = pkgs.writeText "distro-matrix-catalog.json" (builtins.toJSON
+      catalogManifest = pkgs.writeText "mayfly-catalog.json" (builtins.toJSON
         (lib.mapAttrsToList
           (name: d: {
             inherit name;
@@ -41,24 +41,48 @@
           })
           catalogSet));
 
-      # The headline app: `nix run github:conor-sometimes/distro-matrix` reads
-      # ./distro-matrix.toml from the working directory and runs the whole matrix.
+      # The headline app. With no args it reads ./mayfly.nix (a mayfly module),
+      # evaluates it to a manifest in the store, and runs that. With flags, it is
+      # the no-Nix one-off path (a binary and a test). `nix run .#mayfly` and
+      # `nix run github:conor-sometimes/mayfly` both land here.
       defaultApp = pkgs.writeShellApplication {
-        name = "distro-matrix";
-        runtimeInputs = [ pkgs.qemu pkgs.xorriso pkgs.openssh pkgs.coreutils ];
+        name = "mayfly";
+        runtimeInputs = [ pkgs.qemu pkgs.xorriso pkgs.openssh pkgs.coreutils pkgs.nix ];
         text = ''
-          run_dir="$(mktemp -d "''${XDG_RUNTIME_DIR:-/tmp}/distro-matrix.XXXXXX")"
-          export DISTRO_MATRIX_RUN_DIR="$run_dir"
+          run_dir="$(mktemp -d "''${XDG_RUNTIME_DIR:-/tmp}/mayfly.XXXXXX")"
+          export MAYFLY_RUN_DIR="$run_dir"
           trap 'kill -- -$$ 2>/dev/null || true; rm -rf "$run_dir" 2>/dev/null || true' EXIT INT TERM
-          exec ${toolsPkg}/bin/matrix \
-            -catalog ${catalogManifest} \
-            -distrocheck ${toolsPkg}/bin/distrocheck "$@"
+
+          if [ "$#" -gt 0 ] && [ "''${1#-}" != "$1" ]; then
+            # The first argument is a flag: the no-Nix path (a binary and a test).
+            exec ${toolsPkg}/bin/matrix \
+              -catalog ${catalogManifest} \
+              -distrocheck ${toolsPkg}/bin/distrocheck "$@"
+          fi
+
+          if [ ! -f mayfly.nix ]; then
+            echo "mayfly: no ./mayfly.nix here, and no flags." >&2
+            echo "Write a mayfly.nix (see the README) or pass -binary/-test for the no-Nix path." >&2
+            exit 2
+          fi
+
+          # Evaluate ./mayfly.nix (a mayfly module) to a run manifest in the store.
+          mf="$(nix --extra-experimental-features 'nix-command flakes' build --impure --no-link --print-out-paths --expr '
+            let
+              mayfly = builtins.getFlake "'"${self}"'";
+              pkgs = import mayfly.inputs.nixpkgs { system = builtins.currentSystem; };
+            in (mayfly.lib.buildFromModules {
+              inherit pkgs;
+              modules = [ (/. + (builtins.getEnv "PWD" + "/mayfly.nix")) ];
+              specialArgs = { inherit mayfly; };
+            }).manifestFile')"
+          exec ${toolsPkg}/bin/matrix -manifest "$mf" "$@"
         '';
       };
 
       # The smoke subject: a tiny static hello, built from this repo.
       helloPkg = pkgs.buildGoModule {
-        pname = "distro-matrix-hello";
+        pname = "mayfly-hello";
         version = "0.1.0";
         src = self;
         vendorHash = null;
@@ -72,12 +96,12 @@
       smoke = dmlib.mkMatrix {
         inherit pkgs;
         distros = { ubuntu-2404.enable = true; };
-        subject = { name = "hello"; binary = "${helloPkg}/bin/hello"; };
+        subjects.hello = { binary = "${helloPkg}/bin/hello"; };
         test = ./smoke/smoke.sh;
       };
 
       # The oracle's unit tests, run in the Nix sandbox (pure, no network, no KVM).
-      goTest = pkgs.runCommand "distro-matrix-gotest"
+      goTest = pkgs.runCommand "mayfly-gotest"
         { nativeBuildInputs = [ pkgs.go ]; } ''
         export HOME="$TMPDIR" GOCACHE="$TMPDIR/gocache" GOFLAGS=-mod=mod GOPROXY=off
         cp -r ${self} src && chmod -R u+w src && cd src
@@ -90,7 +114,7 @@
       tableRows = lib.concatMapStrings
         (d: "| ${d.title or d.name} | `${d.name}` | ${d.pm} | ${d.family} |\n")
         catalogList;
-      catalogTable = pkgs.writeText "distro-matrix-table.md" ''
+      catalogTable = pkgs.writeText "mayfly-table.md" ''
         <!-- generated by `nix run .#readme`; do not edit by hand -->
         | Distro | Attr | Package manager | Family |
         | --- | --- | --- | --- |
@@ -98,7 +122,7 @@
 
       # The committed table must match the catalog: a new distro attr with a
       # stale distros/TABLE.md fails CI.
-      readmeCheck = pkgs.runCommand "distro-matrix-readme-check" { } ''
+      readmeCheck = pkgs.runCommand "mayfly-readme-check" { } ''
         if ! diff -u ${./distros/TABLE.md} ${catalogTable}; then
           echo "distros/TABLE.md is stale; run: nix run .#readme > distros/TABLE.md"
           exit 1
@@ -107,24 +131,32 @@
       '';
 
       readmeApp = pkgs.writeShellApplication {
-        name = "distro-matrix-readme";
+        name = "mayfly-readme";
         text = "cat ${catalogTable}";
       };
+
+      # The options reference, generated from the schema (lib/module.nix), so it
+      # never drifts. `nix build .#options-doc` writes the Markdown.
+      optionsDoc = (pkgs.nixosOptionsDoc {
+        options = (dmlib.evalCfg { inherit pkgs; modules = [ ]; }).options.mayfly;
+      }).optionsCommonMark;
     in
     {
-      lib = { inherit (dmlib) mkMatrix fetchRelease; };
+      lib = { inherit (dmlib) mkMatrix buildFromModules fetchRelease mayflyModule evalCfg; };
 
-      # The shipped catalog, for `distro-matrix.distros` and lib.filterAttrs over it.
+      # The shipped catalog, for `mayfly.distros` and lib.filterAttrs over it.
       distros = catalogSet;
 
       packages.${system} = {
         default = helloPkg;
         hello = helloPkg;
         readme = catalogTable;
+        options-doc = optionsDoc;
       };
 
       apps.${system} = smoke.apps // {
         default = { type = "app"; program = lib.getExe defaultApp; };
+        mayfly = { type = "app"; program = lib.getExe defaultApp; };
         readme = { type = "app"; program = lib.getExe readmeApp; };
       };
 
