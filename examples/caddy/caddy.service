@@ -1,0 +1,18 @@
+[Unit]
+Description=Caddy (mayfly demo)
+Documentation=https://caddyserver.com/docs/
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+Restart=on-failure
+# A throwaway demo: no persistent state, no privileges, an unprivileged port.
+DynamicUser=yes
+StateDirectory=caddy
+Environment=XDG_DATA_HOME=%S XDG_CONFIG_HOME=%S
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

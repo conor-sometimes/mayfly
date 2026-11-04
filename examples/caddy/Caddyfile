@@ -1,0 +1,9 @@
+# mayfly caddy demo: a tiny HTTP responder on :8080, no TLS, no disk.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	respond "mayfly-caddy-ok" 200
+}
