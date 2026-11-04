@@ -146,8 +146,8 @@ in
     opensuse-leap-16 = mkVersion suse {
       title = "openSUSE Leap 16";
       image = {
-        url = "https://downloadcontent.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.88.qcow2";
-        sha256 = "e2c0554c70739cf820aef343543d3aa8d4b32159b407d8b3935322e1346ea337";
+        url = "https://downloadcontent.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.89.qcow2";
+        sha256 = "2f328a0135f9c8bf62c5ec012405169f76188ea7abf18f9c65cb0ea5374c042b";
       };
     };
 
