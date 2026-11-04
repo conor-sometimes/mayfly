@@ -129,6 +129,16 @@
         go test ./... | tee "$out"
       '';
 
+      # The same suite under the race detector: the matrix runner boots several
+      # distros concurrently, so a data race is a real risk. The race detector is
+      # cgo, so this check needs a C toolchain in the sandbox (CGO on).
+      goRace = pkgs.runCommand "mayfly-gorace"
+        { nativeBuildInputs = [ pkgs.go pkgs.gcc ]; } ''
+        export HOME="$TMPDIR" GOCACHE="$TMPDIR/gocache" GOFLAGS=-mod=mod GOPROXY=off CGO_ENABLED=1
+        cp -r ${self} src && chmod -R u+w src && cd src
+        go test ./... -race -count=1 | tee "$out"
+      '';
+
       # The generated distro table: every entry in the shipped catalog, one row.
       catalogList = lib.sort (a: b: a.name < b.name)
         (lib.mapAttrsToList (name: d: d // { inherit name; }) catalogSet);
@@ -192,6 +202,7 @@
       # on a KVM host, and mkMatrix returns them for consumers who want them.
       checks.${system} = {
         gotest = goTest;
+        race = goRace;
         readme = readmeCheck;
         schema = schemaTest;
       };

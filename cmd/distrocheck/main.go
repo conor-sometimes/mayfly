@@ -470,6 +470,7 @@ func (c *checker) provisionSubject(s report.Subject) error {
 		}
 	}
 	for guestPath, source := range s.Files {
+		// #nosec G301 -- a guest config dir (e.g. /etc/caddy) must stay readable by the service, which often runs as its own user
 		if err := os.MkdirAll(filepath.Dir(guestPath), 0o755); err != nil {
 			return err
 		}

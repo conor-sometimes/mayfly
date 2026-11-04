@@ -3,22 +3,63 @@
 default:
     @just --list
 
-# Build the Go binaries and run the oracle's unit tests.
+# The full gate, matching the family's bar (banken): static analysis, the unit
+# suite with the race detector, coverage, and the pure Nix checks. Individual
+# pieces are their own recipes below. (fuzz and mutation are heavier, run them
+# on their own; the per-distro VM runs need KVM.)
+check: fmt-check vet lint errcheck gosec vulncheck race cover
+    nix flake check
+
+# Build the binaries and run the unit + property tests (no race; quick).
 test:
     CGO_ENABLED=0 go build ./...
     go test ./...
 
-# Format and vet the Go.
+# The unit + property suite with the race detector on and no caching: mayfly's
+# matrix runner is concurrent (it boots several distros at once), so this is not
+# optional. Needs a C toolchain (the race detector is cgo).
+race:
+    CGO_ENABLED=1 go test ./... -race -count=1
+
+# Coverage of the suite.
+cover:
+    go test ./... -cover -count=1
+
+# Format (write locally; `fmt-check` in the gate).
 fmt:
     gofumpt -w .
+
+fmt-check:
+    gofumpt -l .
+
+vet:
     go vet ./...
 
-# The full pure gate: Go, flake eval, and the README table check.
-check:
-    CGO_ENABLED=0 go build ./...
-    go test ./...
-    gofumpt -l .
-    nix flake check
+# staticcheck: the standard linter beyond vet.
+lint:
+    staticcheck ./...
+
+# Every error return is checked or explicitly ignored.
+errcheck:
+    errcheck ./...
+
+# Security static analysis. G204 (a subprocess with variable args) and
+# G304/G703 (reading a path the config or manifest names) are inherent to a tool
+# whose whole job is to run distro commands and read the images/scripts it is
+# told to, inside a throwaway VM and run dir; they are excluded. Everything else
+# (permissions, etc.) must be clean.
+gosec:
+    gosec -quiet -exclude=G204,G304,G703 ./...
+
+# Known-vulnerability scan of the dependency graph.
+vulncheck:
+    govulncheck ./...
+
+# Mutation testing: mutate the oracle (the trustworthy core - subtree
+# attribution and the parsers) and confirm the suite catches each change. The
+# strongest statement a testing tool can make about its own tests.
+mutation:
+    gremlins unleash ./internal/oracle
 
 # Fuzz every parser that reads input the engine does not control (the audit
 # log, a subject's OCSF jsonl, a distro's tool output, the guest serial log).

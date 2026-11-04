@@ -194,7 +194,7 @@ func assembleImpure() (Manifest, error) {
 		if err := copyInto(*distrocheck, filepath.Join(payload, "distrocheck")); err != nil {
 			return m, fmt.Errorf("stage distrocheck: %w", err)
 		}
-		_ = os.Chmod(filepath.Join(payload, "distrocheck"), 0o755)
+		_ = os.Chmod(filepath.Join(payload, "distrocheck"), 0o755) // #nosec G302 -- an executable needs its exec bit
 	}
 	m.Payload = payload
 
@@ -380,7 +380,7 @@ func summarize(distros []Distro, reports []report.Report) int {
 	}
 	if *jsonOut != "" {
 		if data, err := json.MarshalIndent(reports, "", "  "); err == nil {
-			_ = os.WriteFile(*jsonOut, data, 0o644) //nolint:gosec // a report the user asked us to write
+			_ = os.WriteFile(*jsonOut, data, 0o600) // a report the user asked us to write
 		}
 	}
 	if failed > 0 {
@@ -593,7 +593,7 @@ func (g *guest) writeSeed() error {
 		return err
 	}
 	seedDir := g.path("seed")
-	if err := os.MkdirAll(seedDir, 0o755); err != nil {
+	if err := os.MkdirAll(seedDir, 0o700); err != nil { // holds the run's cloud-init seed; owner-only
 		return err
 	}
 	meta := fmt.Sprintf("instance-id: matrix-%s\nlocal-hostname: matrix-%s\n", g.d.Name, g.d.Name)
@@ -826,7 +826,7 @@ func requireKVM() error {
 // falls back to a fresh dir under the runtime dir.
 func runRoot() string {
 	if d := os.Getenv("MAYFLY_RUN_DIR"); d != "" {
-		_ = os.MkdirAll(d, 0o755)
+		_ = os.MkdirAll(d, 0o700) // holds each run's work dirs (ssh keys); owner-only
 		return d
 	}
 	base := os.Getenv("XDG_RUNTIME_DIR")
@@ -834,7 +834,7 @@ func runRoot() string {
 		base = os.TempDir()
 	}
 	root := filepath.Join(base, "mayfly")
-	_ = os.MkdirAll(root, 0o755)
+	_ = os.MkdirAll(root, 0o700) // holds each run's work dirs (ssh keys); owner-only
 	return root
 }
 
