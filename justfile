@@ -39,6 +39,24 @@ fuzz N='50000x':
     echo "=== matrix FuzzLastReport ({{N}}) ==="
     go test -run='^$' -fuzz='^FuzzLastReport$' -fuzztime={{N}} ./cmd/matrix
 
+# Flake-rate soak: boot + install + test + teardown the smoke matrix R times and
+# report the pass rate. This MEASURES flakiness (not a CI gate - a soak that must
+# be 100% green every run is itself flake-sensitive). Needs KVM. Run on a quiet
+# host; each run is a fresh VM. e.g. just soak 20
+soak R='10':
+    #!/usr/bin/env bash
+    set -uo pipefail
+    pass=0; fail=0; logdir="$(mktemp -d)"
+    for i in $(seq 1 {{R}}); do
+        if nix run .#matrix >"$logdir/run$i.log" 2>&1; then
+            pass=$((pass + 1)); echo "run $i/{{R}}: PASS"
+        else
+            fail=$((fail + 1)); echo "run $i/{{R}}: FAIL (see $logdir/run$i.log)"; tail -4 "$logdir/run$i.log"
+        fi
+    done
+    echo "soak: $pass/{{R}} passed, $fail failed  (logs: $logdir)"
+    [ "$fail" -eq 0 ]
+
 # Regenerate the committed distro table from the catalog.
 readme:
     nix run .#readme > distros/TABLE.md
