@@ -16,9 +16,19 @@ in
 {
   distros = {
     ubuntu-2404.enable = true;
+    ubuntu-2204.enable = true;
+    debian-13.enable = true;
     fedora-44.enable = true;
     rocky-9.enable = true;
+    alma-10.enable = true;
+    amazonlinux-2023.enable = true;
+    opensuse-leap-16.enable = true;
   };
+
+  # A wide matrix on one host: boot one distro at a time rather than letting
+  # several share the RAM. Drop this (or set "auto") on a big host; raise to 2/3
+  # on a host with the RAM for it.
+  concurrency = 1;
 
   install = {
     binary = "${hitomi.packages.x86_64-linux.hitomi-musl}/bin/hitomi";
