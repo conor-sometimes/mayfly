@@ -159,6 +159,11 @@
       optionsDoc = (pkgs.nixosOptionsDoc {
         options = (dmlib.evalCfg { inherit pkgs; modules = [ ]; }).options;
       }).optionsCommonMark;
+
+      # Schema tests (pure): the module typechecks a good config and rejects bad
+      # ones, and the catalog overlay resolves. The behaviour half of the gold
+      # standard is the gated per-distro VM runs (they need KVM).
+      schemaTest = import ./tests/schema.nix { inherit pkgs lib dmlib; };
     in
     {
       lib = { inherit (dmlib) mkMatrix buildFromModules fetchRelease mayflyModule evalCfg; };
@@ -186,6 +191,7 @@
       checks.${system} = {
         gotest = goTest;
         readme = readmeCheck;
+        schema = schemaTest;
       };
 
       formatter.${system} = pkgs.nixpkgs-fmt;
