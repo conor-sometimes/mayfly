@@ -3,7 +3,8 @@
 # the host runner consumes. lib/default.nix evalModules the user's mayfly.nix
 # (or flake options) against lib/module.nix and hands the result here.
 #
-# matrixSrc and catalogSet are baked in by the flake; cfg is config.mayfly.
+# matrixSrc and catalogSet are baked in by the flake; cfg is the evaluated
+# config (the root of the user's mayfly.nix).
 { pkgs
 , lib ? pkgs.lib
 , matrixSrc
@@ -31,15 +32,16 @@ let
   resolved = lib.mapAttrs resolveOne enabled;
   distroList = lib.attrValues resolved;
 
-  subject = cfg.subject;
-  subjects = cfg.subjects;
+  subject = cfg.install;
+  subjects = cfg.installs;
   test = cfg.test;
   checks = cfg.checks;
 
   imageOf = d:
     if d.image ? drv then d.image.drv pkgs
-    else pkgs.fetchurl ({ inherit (d.image) url; }
-      // (if d.image ? sha512 then { inherit (d.image) sha512; } else { inherit (d.image) sha256; }));
+    else
+      pkgs.fetchurl ({ inherit (d.image) url; }
+        // (if d.image ? sha512 then { inherit (d.image) sha512; } else { inherit (d.image) sha256; }));
 
   # --- normalize the consumer's subjects and checks ---
   subjectSet = (lib.optionalAttrs (subject != null) { ${subject.name or "subject"} = subject; }) // subjects;

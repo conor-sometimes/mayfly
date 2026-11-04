@@ -71,20 +71,18 @@ clear message).
 # mayfly.nix
 { ... }:
 {
-  mayfly = {
-    distros = {
-      ubuntu-2404.enable = true;
-      fedora-44.enable = true;
-      debian-13.enable = true;
-    };
-    subject = {
-      binary = ./mytool;                         # installed onto PATH in each guest
-      packages = [ "curl" ];                     # installed first, per distro
-      unit = ./mytool.service;                   # installed, enabled and started
-      files = { "/etc/mytool/config.yml" = ./config.yml; };
-    };
-    test = ./check.sh;                           # run in-guest after the subject is up
+  distros.ubuntu-2404.enable = true;
+  distros.fedora-44.enable   = true;
+  distros.debian-13.enable   = true;
+
+  install = {
+    binary   = ./mytool;                       # installed onto PATH in each guest
+    packages = [ "curl" ];                     # installed first, per distro
+    unit     = ./mytool.service;               # installed, enabled and started
+    files."/etc/mytool/config.yml" = ./config.yml;
   };
+
+  test = ./check.sh;                           # run in-guest after the install is up
 }
 ```
 
@@ -129,12 +127,13 @@ A `mayfly.nix` at the repo root, reaching your own package via `self`:
 # mayfly.nix
 { self, pkgs, ... }:
 {
-  mayfly = {
-    distros = { ubuntu-2404.enable = true; fedora-44.enable = true; };
-    subject.binary = "${self.packages.x86_64-linux.mytool}/bin/mytool";
-    subject.unit   = ./mytool.service;
-    test = ./check.sh;
-  };
+  distros.ubuntu-2404.enable = true;
+  distros.fedora-44.enable   = true;
+
+  install.binary = "${self.packages.x86_64-linux.mytool}/bin/mytool";
+  install.unit   = ./mytool.service;
+
+  test = ./check.sh;
 }
 ```
 
@@ -163,14 +162,14 @@ matrix, with no setup of their own.
 
 ## Two test tiers
 
-Pick the one that fits. Both run after the subject is provisioned and started.
+Pick the one that fits. Both run after the install block is provisioned and started.
 
 - `test = ./check.sh` is the simple tier. The script runs as root in the guest.
   Exit 0 is a pass; any other exit fails the distro, with the script's last
   lines in the report. This is the "anyone can use it" path.
 - `checks = { ... }` is the structured tier. It is the detection oracle: each
   `detect` check runs an emulation under its own launcher and attributes the
-  subject's OCSF findings to that check by process-subtree identity. This is
+  installed software's OCSF findings to that check by process-subtree identity. This is
   what makes the banken matrix trustworthy. See [The module API](#the-module-api).
 
 `test` is sugar; `checks` is the full engine. You can use either.
@@ -245,9 +244,11 @@ distros = {
 
 ## The module API
 
-### Subject
+### Install
 
-A subject is a declarative record of exactly what lands in each guest.
+The `install` block is a declarative record of exactly what lands in each guest,
+and is the thing under test. For more than one thing per guest, use named
+`installs` (an attrset of these same blocks, provisioned in order).
 
 | Field | Meaning |
 | --- | --- |
@@ -257,8 +258,8 @@ A subject is a declarative record of exactly what lands in each guest.
 | `packages` | generic package names, installed first via the distro's package manager |
 | `enable` | units to `systemctl enable --now` (defaults to the unit basenames) |
 | `setup` | a script run once as root after files land |
-| `ocsf` | a glob of OCSF jsonl findings the subject writes (for `detect` checks) |
-| `scan` | a command that drives a batch subject once (banken's oneshot scan); omit for a daemon |
+| `ocsf` | a glob of OCSF jsonl findings the installed software writes (for `detect` checks) |
+| `scan` | a command that drives a batch install once (banken's oneshot scan); omit for a daemon |
 
 `packages` is the key simplifier: you write generic names once (`[ "auditd"
 "python3" "curl" ]`), and the per-distro catalog entry maps each to that
@@ -266,7 +267,7 @@ distro's spelling and package manager. "install auditd" works on every distro.
 A name no distro maps is a clear error naming the distro and the name, never a
 silent skip.
 
-The static-binary rule: a subject binary must be statically linked, so it is
+The static-binary rule: an installed binary must be statically linked, so it is
 copy-and-run on any Linux of the same architecture. banken is CGO-free static
 Go; mimi and hitomi are musl-static.
 
@@ -298,8 +299,8 @@ checks = {
 
 The check kinds:
 
-- `detect`: run the emulation under a launcher, attribute the subject's OCSF
-  findings to it by process-subtree identity, and assert the fired rule set
+- `detect`: run the emulation under a launcher, attribute the installed
+  software's OCSF findings to it by process-subtree identity, and assert the fired rule set
   equals `expect` exactly. A miss fails. An extra fails.
 - `script`: run a script as root and parse its `<id> PASS|FAIL|SKIP <detail>`
   lines, one check per declared id. A `SKIP` is recorded, not failed.
@@ -308,8 +309,8 @@ The check kinds:
 - `lsm`: the distro's SELinux or AppArmor logged no denial mentioning the match.
 
 A check's `when` predicate takes the distro attr and returns whether the check
-applies to that distro. `tools` names commands the check needs, resolved like a
-subject's packages; `optional` turns a missing tool into a skip.
+applies to that distro. `tools` names commands the check needs, resolved like an
+install's packages; `optional` turns a missing tool into a skip.
 
 ### mkMatrix returns
 
@@ -329,7 +330,7 @@ Splice `apps` and `checks` into your own flake with `//`.
 
 ### Options reference
 
-The full option set (distros, subject, subjects, test, checks, parallelism,
+The full option set (distros, install, installs, test, checks, parallelism,
 teardown, timeouts, ssh user) is declared in `lib/module.nix` and type-checked
 at eval. The reference is generated from that schema, so it never drifts:
 
@@ -357,7 +358,7 @@ flowchart TD
    SSH with backoff, then waits for `cloud-init status --wait`. A guest that
    never comes up hits a timeout with a clear, distro-named error and the
    serial-console tail, not a silent hang.
-2. Provision. The subject's packages install via the distro's own package
+2. Provision. The install's packages install via the distro's own package
    manager (with retry on a transient mirror failure). The binary, units and
    files are scp'd in, and the units are enabled and started.
 3. Test. The in-guest oracle (`distrocheck`, itself a static binary) runs the
@@ -464,7 +465,7 @@ Know what mayfly is not before you reach for it.
 - x86_64-linux only, for now. The catalog images and the flake target x86_64.
   aarch64 is a catalog-and-image question, not a design one.
 - Ephemeral and binary modes only, for now. Every run boots a fresh VM; the
-  warm-pool daemon that makes re-runs seconds is on the roadmap. The subject is a
+  warm-pool daemon that makes re-runs seconds is on the roadmap. The install is a
   pre-built binary; the clone-the-source-and-build-in-guest mode is on the
   roadmap too.
 - NixOS guests are not in the catalog. For a NixOS guest, `runNixOSTest` is the
@@ -474,7 +475,7 @@ Know what mayfly is not before you reach for it.
 
 | Item | Status |
 | --- | :---: |
-| Engine: catalog-enable, subject, test and checks tiers, deterministic oracle | done |
+| Engine: catalog-enable, install, test and checks tiers, deterministic oracle | done |
 | Ubuntu 24.04 proven end to end under KVM on hokkaido | done |
 | SSH transport, cloud-init readiness, two-layer teardown | done |
 | The other seven vendor distros (one catalog attr each) | in progress |

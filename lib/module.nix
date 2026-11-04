@@ -1,7 +1,7 @@
-# The mayfly options schema. A run is a module: the user sets options.mayfly.*
-# (in a mayfly.nix, or in their own flake), evalModules type-checks it, and the
-# runner executes the result. A wrong field fails at eval with a clear message.
-# The README options reference is generated from this schema.
+# The mayfly options schema. A run is a module: the user writes a mayfly.nix
+# (distros, install, test), evalModules type-checks it, and the runner executes
+# the result. A wrong field fails at eval with a clear message. The README
+# options reference is generated from this schema.
 { lib, catalogSet, ... }:
 let
   inherit (lib) mkOption mkEnableOption types;
@@ -58,16 +58,16 @@ let
       units = mkOption { type = types.listOf types.path; default = [ ]; description = "Several unit files."; };
       files = mkOption { type = types.attrsOf types.path; default = { }; description = "{ \"/guest/path\" = ./source; } copied verbatim."; };
       packages = mkOption { type = types.listOf types.str; default = [ ]; description = "Generic package names installed first, per distro."; };
-      start = mkOption { type = types.bool; default = true; description = "Enable and start the subject's units by default (a daemon). Set false to install but not start (banken's oneshot, driven by `scan`)."; };
-      enable = mkOption { type = types.listOf types.str; default = [ ]; description = "Extra units to `systemctl enable --now` beyond the subject's own."; };
+      start = mkOption { type = types.bool; default = true; description = "Enable and start this install's units by default (a daemon). Set false to install but not start (banken's oneshot, driven by `scan`)."; };
+      enable = mkOption { type = types.listOf types.str; default = [ ]; description = "Extra units to `systemctl enable --now` beyond this install's own."; };
       setup = mkOption { type = types.nullOr types.path; default = null; description = "A script run once as root after files land."; };
-      ocsf = mkOption { type = types.str; default = ""; description = "Glob of OCSF jsonl findings this subject writes (for detect checks)."; };
-      scan = mkOption { type = types.listOf types.str; default = [ ]; description = "Command to drive a batch subject once (banken's oneshot scan)."; };
+      ocsf = mkOption { type = types.str; default = ""; description = "Glob of OCSF jsonl findings this install writes (for detect checks)."; };
+      scan = mkOption { type = types.listOf types.str; default = [ ]; description = "Command to drive a batch install once (banken's oneshot scan)."; };
     };
   };
 in
 {
-  options.mayfly = {
+  options = {
     distros = mkOption {
       type = types.attrsOf (types.submodule distroModule);
       default = { };
@@ -75,22 +75,22 @@ in
       description = "Distros to boot. Enable a shipped one (`ubuntu-2404.enable = true`) or add a custom entry (image + pm + packages).";
     };
 
-    subject = mkOption {
+    install = mkOption {
       type = types.nullOr (types.submodule subjectModule);
       default = null;
-      description = "The single thing under test. Use `subjects` for more than one.";
+      description = "What lands on each guest, and is the thing under test: a binary, packages, units, files, a setup script. Use `installs` to put more than one thing on each guest.";
     };
 
-    subjects = mkOption {
+    installs = mkOption {
       type = types.attrsOf (types.submodule subjectModule);
       default = { };
-      description = "Named subjects, provisioned in order (banken's matrix passes mimi and banken).";
+      description = "Named installs, provisioned in order, when a run needs more than one thing on each guest (banken's matrix installs mimi and banken).";
     };
 
     test = mkOption {
       type = types.nullOr (types.either types.path types.str);
       default = null;
-      description = "A script run in-guest after the subject is up; exit 0 is a pass (the simple tier).";
+      description = "A script run in-guest after the install is up; exit 0 is a pass (the simple tier).";
     };
 
     checks = mkOption {

@@ -14,22 +14,20 @@ let
   suiteTar = pkgs.runCommand "hitomi-suite.tar" { } "tar -C ${hitomi}/testdata -cf $out suite";
 in
 {
-  mayfly = {
-    distros = {
-      ubuntu-2404.enable = true;
-      fedora-44.enable = true;
-    };
-
-    subject = {
-      binary = "${hitomi.packages.x86_64-linux.hitomi-musl}/bin/hitomi";
-      files = {
-        "/opt/hitomi/rules.tar" = rulesTar;
-        "/opt/hitomi/suite.tar" = suiteTar;
-      };
-      setup = ./setup.sh; # unpacks the tars into /etc/hitomi/rules and /opt/suite
-    };
-
-    # Exit 0 on 100% TP / 0% FP; any miss or false positive fails the distro.
-    test = ./run-suite.sh;
+  distros = {
+    ubuntu-2404.enable = true;
+    fedora-44.enable = true;
   };
+
+  install = {
+    binary = "${hitomi.packages.x86_64-linux.hitomi-musl}/bin/hitomi";
+    files = {
+      "/opt/hitomi/rules.tar" = rulesTar;
+      "/opt/hitomi/suite.tar" = suiteTar;
+    };
+    setup = ./setup.sh; # unpacks the tars into /etc/hitomi/rules and /opt/suite
+  };
+
+  # Exit 0 on 100% TP / 0% FP; any miss or false positive fails the distro.
+  test = ./run-suite.sh;
 }

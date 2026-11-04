@@ -12,7 +12,7 @@ let
   build = pkgs: eval:
     (import ./mkMatrix.nix {
       inherit pkgs lib matrixSrc catalogSet;
-      cfg = eval.config.mayfly;
+      cfg = eval.config;
     }) // { inherit eval; };
 in
 rec {
@@ -21,16 +21,16 @@ rec {
   buildFromModules = { pkgs, modules, specialArgs ? { } }:
     build pkgs (evalCfg { inherit pkgs modules specialArgs; });
 
-  # mkMatrix { pkgs; distros; subject; test; checks; ... } -> { apps; checks;
+  # mkMatrix { pkgs; distros; install; test; checks; ... } -> { apps; checks;
   # readme; manifestFile; eval; }. The attrset is sugar for a one-module run.
   mkMatrix = { pkgs, ... }@args:
     buildFromModules {
       inherit pkgs;
-      modules = [ { mayfly = removeAttrs args [ "pkgs" "lib" ]; } ];
+      modules = [ (removeAttrs args [ "pkgs" "lib" ]) ];
     };
 
-  # The options schema, for a consumer that wants to set mayfly.* in their own
-  # module system, and for generating the options reference.
+  # The options schema, for a consumer that wants to set the options in their
+  # own module system, and for generating the options reference.
   mayflyModule = ./module.nix;
   inherit evalCfg;
 

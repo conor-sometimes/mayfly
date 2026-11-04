@@ -12,25 +12,21 @@
 # flake input) and `pkgs`. See README.md: this needs the mimi repo reachable.
 { mimi, pkgs, ... }:
 {
-  mayfly = {
-    distros = {
-      ubuntu-2404.enable = true;
-    };
+  distros.ubuntu-2404.enable = true;
 
-    subject = {
-      # The fully-static musl build (copy-and-run on non-NixOS): the bytes mimi
-      # ships, not the gnu/NixOS build. The probe is embedded in the binary.
-      binary = "${mimi.packages.x86_64-linux.mimi-musl}/bin/mimi";
-      # A fixed path the unit's ExecStart can name (the default install path is
-      # derived from the subject name, which is not "mimi" for a single subject).
-      installPath = "/usr/local/bin/mimi";
-      # A long-running daemon, not a one-shot: mayfly enables and starts it
-      # (subject.start defaults true), then the test runs.
-      unit = ./mimi.service;
-    };
-
-    # Exit 0 = the unit stayed up, the probe loaded off Ubuntu's BTF, and the
-    # canary exec was captured as a mimi/2 OCSF event. See check.sh.
-    test = ./check.sh;
+  install = {
+    # The fully-static musl build (copy-and-run on non-NixOS): the bytes mimi
+    # ships, not the gnu/NixOS build. The probe is embedded in the binary.
+    binary = "${mimi.packages.x86_64-linux.mimi-musl}/bin/mimi";
+    # A fixed path the unit's ExecStart can name (the default install path is
+    # derived from the install's name, not "mimi" for an unnamed single install).
+    installPath = "/usr/local/bin/mimi";
+    # A long-running daemon, not a one-shot: mayfly enables and starts it
+    # (install.start defaults true), then the test runs.
+    unit = ./mimi.service;
   };
+
+  # Exit 0 = the unit stayed up, the probe loaded off Ubuntu's BTF, and the
+  # canary exec was captured as a mimi/2 OCSF event. See check.sh.
+  test = ./check.sh;
 }

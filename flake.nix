@@ -80,7 +80,7 @@
         '';
       };
 
-      # The smoke subject: a tiny static hello, built from this repo.
+      # The smoke install: a tiny static hello, built from this repo.
       helloPkg = pkgs.buildGoModule {
         pname = "mayfly-hello";
         version = "0.1.0";
@@ -96,17 +96,17 @@
       smoke = dmlib.mkMatrix {
         inherit pkgs;
         distros = { ubuntu-2404.enable = true; };
-        subjects.hello = { binary = "${helloPkg}/bin/hello"; };
+        installs.hello = { binary = "${helloPkg}/bin/hello"; };
         test = ./smoke/smoke.sh;
       };
 
       # The demo: zero input. Boots ubuntu-2404, installs a package, drops the
-      # tiny hello subject, runs a check, prints the green matrix, tears down.
+      # tiny hello binary, runs a check, prints the green matrix, tears down.
       # `nix run github:conor-sometimes/mayfly#demo`.
       demo = dmlib.mkMatrix {
         inherit pkgs;
         distros = { ubuntu-2404.enable = true; };
-        subjects.hello = { binary = "${helloPkg}/bin/hello"; packages = [ "curl" ]; };
+        installs.hello = { binary = "${helloPkg}/bin/hello"; packages = [ "curl" ]; };
         test = ./smoke/smoke.sh;
       };
       demoApp = pkgs.writeShellApplication {
@@ -157,7 +157,7 @@
       # The options reference, generated from the schema (lib/module.nix), so it
       # never drifts. `nix build .#options-doc` writes the Markdown.
       optionsDoc = (pkgs.nixosOptionsDoc {
-        options = (dmlib.evalCfg { inherit pkgs; modules = [ ]; }).options.mayfly;
+        options = (dmlib.evalCfg { inherit pkgs; modules = [ ]; }).options;
       }).optionsCommonMark;
     in
     {

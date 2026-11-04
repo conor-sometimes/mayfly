@@ -22,7 +22,7 @@ let
   # --- base families: the per-distro knowledge shared across versions ---
 
   # The commands the banken-family matrix and the generic engine resolve. A
-  # consumer that names a package not here (subject.packages) gets a clear
+  # consumer that names a package not here (install.packages) gets a clear
   # error; extend the base or the version.
   rhelPackages = {
     auditd = "audit";
