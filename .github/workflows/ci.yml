@@ -70,13 +70,11 @@ jobs:
           govulncheck ./...
 
   # A real single-distro smoke on a KVM-capable hosted runner: the actual
-  # boot -> provision -> check -> teardown lifecycle, in CI, for free. Marked
-  # continue-on-error so a runner without usable nested KVM does not redden CI
-  # (the authoritative matrix runs on a dedicated KVM host); drop that once a
-  # run confirms the hosted runner boots it.
+  # boot -> provision -> check -> teardown lifecycle, in CI, for free. A hosted
+  # ubuntu-latest run confirmed nested KVM works, so this is a real gate. The
+  # authoritative full 8-distro matrix runs on a dedicated KVM host.
   one-distro:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: KVM for the runner user
