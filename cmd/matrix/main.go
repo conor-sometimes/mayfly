@@ -375,6 +375,9 @@ func summarize(distros []Distro, reports []report.Report) int {
 			failed++
 		}
 	}
+	if t := matrixTable(distros, reports); t != "" {
+		fmt.Printf("\nsummary:\n%s", t)
+	}
 	if *jsonOut != "" {
 		if data, err := json.MarshalIndent(reports, "", "  "); err == nil {
 			_ = os.WriteFile(*jsonOut, data, 0o644) //nolint:gosec // a report the user asked us to write
@@ -386,6 +389,81 @@ func summarize(distros []Distro, reports []report.Report) int {
 	}
 	fmt.Printf("ok: all %d distro(s) passed\n", len(distros))
 	return 0
+}
+
+// matrixTable renders the at-a-glance grid that reads a multi-distro run at a
+// glance: rows are distros, columns are check ids, and each cell is PASS, FAIL,
+// SKIP, "-" (the check's `when` did not apply to that distro) or ERR (the distro
+// returned no report at all). The per-line output above stays the grep-able
+// record; this is the human summary. Returns "" for a single cell, which is not
+// a matrix. Pure (unit-tested in summary_test.go).
+func matrixTable(distros []Distro, reports []report.Report) string {
+	var cols []string
+	seen := map[string]bool{}
+	for _, rep := range reports {
+		for _, ck := range rep.Checks {
+			if !seen[ck.ID] {
+				seen[ck.ID] = true
+				cols = append(cols, ck.ID)
+			}
+		}
+	}
+	if len(distros) < 2 && len(cols) < 2 {
+		return ""
+	}
+
+	cell := func(rep report.Report, id string) string {
+		if len(rep.Checks) == 0 {
+			return "ERR"
+		}
+		for _, ck := range rep.Checks {
+			if ck.ID == id {
+				switch {
+				case ck.Skip:
+					return "SKIP"
+				case ck.Pass:
+					return "PASS"
+				default:
+					return "FAIL"
+				}
+			}
+		}
+		return "-"
+	}
+
+	nameW := len("distro")
+	for _, d := range distros {
+		if len(d.Name) > nameW {
+			nameW = len(d.Name)
+		}
+	}
+	colW := make([]int, len(cols))
+	for j, c := range cols {
+		if colW[j] = len(c); colW[j] < 4 {
+			colW[j] = 4
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%-*s", nameW, "distro")
+	for j, c := range cols {
+		fmt.Fprintf(&b, "  %-*s", colW[j], c)
+	}
+	b.WriteByte('\n')
+	for i, d := range distros {
+		fmt.Fprintf(&b, "%-*s", nameW, d.Name)
+		for j, c := range cols {
+			fmt.Fprintf(&b, "  %-*s", colW[j], cell(reports[i], c))
+		}
+		b.WriteByte('\n')
+	}
+
+	// Drop the padding whitespace the last column leaves at each line's end.
+	lines := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 // bootOne runs one distro end to end and returns its report. Every resource it
