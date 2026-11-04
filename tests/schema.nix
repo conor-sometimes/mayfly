@@ -28,14 +28,20 @@ let
   badUnknown = (run { distros.ubuntu-2404.enable = true; notAnOption = true; }).eval.config;
   badCustom = (run { distros.nope.enable = true; }).manifest.distros;
 
+  # concurrency: accepts a positive int (1 = sequential) and "auto"; 0 is rejected.
+  oneConcurrency = (run { distros.ubuntu-2404.enable = true; concurrency = 1; }).eval.config.concurrency;
+  badConcurrency = (run { distros.ubuntu-2404.enable = true; concurrency = 0; }).eval.config.concurrency;
+
   checks = [
     { name = "good config evaluates"; ok = force goodSubjects; }
     { name = "single install -> one subject, no binary"; ok = builtins.length single == 1 && (builtins.head single).binary == ""; }
     { name = "installs plural -> two subjects"; ok = builtins.length plural == 2; }
     { name = "catalog overlay resolves pm + name"; ok = distro0.pm == "apt" && distro0.name == "ubuntu-2404"; }
+    { name = "concurrency accepts a positive int"; ok = oneConcurrency == 1; }
     { name = "wrong-typed install.binary is rejected"; ok = evalFails (force badType); }
     { name = "unknown option is rejected"; ok = evalFails (force badUnknown); }
     { name = "custom distro without image + pm is rejected"; ok = evalFails (force badCustom); }
+    { name = "concurrency = 0 (not positive) is rejected"; ok = evalFails (force badConcurrency); }
   ];
   failed = lib.filter (c: !c.ok) checks;
 in

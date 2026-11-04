@@ -105,6 +105,17 @@ in
       description = "The sudo user the harness provisions and connects as.";
     };
 
+    concurrency = mkOption {
+      type = types.either (types.enum [ "auto" ]) types.ints.positive;
+      default = "auto";
+      example = 1;
+      description = ''
+        How many distros boot at once. "auto" (the default) bounds by host CPU and
+        RAM; a positive integer is that many at a time (1 = sequential, essential
+        for a wide matrix on a small host where N guests * ~2 GiB each adds up).
+      '';
+    };
+
     keepWorkDir = mkOption {
       type = types.bool;
       default = false;
