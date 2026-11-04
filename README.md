@@ -28,6 +28,7 @@ containerised. You write only declarative Nix. All the imperative fragility
 - [Three ways to use it](#three-ways-to-use-it)
 - [Worked examples](#worked-examples)
 - [Requirements](#requirements)
+- [Limitations](#limitations)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -51,6 +52,12 @@ Two audiences use the same repo:
 - The banken family. banken, mimi and hitomi each consume the repo as a flake
   input, each passing its own binary and checks. The result is the per-distro
   detection matrix the badges come from.
+
+Reach for mayfly when your software touches the OS: a daemon, a systemd unit, a
+tool that reads auditd, anything kernel-, init- or filesystem-dependent. You need
+to know it behaves on a real Rocky or Debian as the vendor ships it, not on a
+NixOS stand-in or a shared-kernel container. For pure userspace logic a normal CI
+matrix is fine. mayfly earns its keep where the real OS matters.
 
 ## Quick start
 
@@ -112,24 +119,47 @@ nix run github:conor-sometimes/mayfly -- \
 
 ### Wired into your own flake
 
-For a project whose binary is already a flake output, call `mkMatrix` (sugar for
-a one-module run) and splice its apps into your flake:
+This is the pattern for shipping mayfly tests *inside your repo*, so anyone who
+clones it can run them. Your binary is already a flake output, so the test can
+reference it through `self`. Two small pieces:
+
+A `mayfly.nix` at the repo root, reaching your own package via `self`:
 
 ```nix
-mayfly.lib.mkMatrix {
-  inherit pkgs;
-  distros = { ubuntu-2404.enable = true; fedora-44.enable = true; };
-  subject = {
-    binary = "${myTool}/bin/mytool";
-    unit = ./mytool.service;
-    packages = [ "curl" ];
+# mayfly.nix
+{ self, pkgs, ... }:
+{
+  mayfly = {
+    distros = { ubuntu-2404.enable = true; fedora-44.enable = true; };
+    subject.binary = "${self.packages.x86_64-linux.mytool}/bin/mytool";
+    subject.unit   = ./mytool.service;
+    test = ./check.sh;
   };
-  test = ./check.sh;
 }
 ```
 
-That gives you `nix run .#matrix`, `nix run .#distro-ubuntu-2404` and the rest,
-each a real boot.
+And ~5 lines in your `flake.nix` to expose it as apps:
+
+```nix
+inputs.mayfly.url = "github:conor-sometimes/mayfly";
+# ... in outputs, alongside your existing apps:
+apps.x86_64-linux = (mayfly.lib.buildFromModules {
+  inherit pkgs;
+  modules     = [ ./mayfly.nix ];
+  specialArgs = { inherit self; };   # lets mayfly.nix reach self.packages
+}).apps;
+```
+
+Now anyone who clones your repo runs:
+
+```sh
+nix run .#matrix              # every enabled distro
+nix run .#distro-ubuntu-2404  # just one
+```
+
+So the split is clear: `mayfly.nix` says *what* to test, the flake wiring says
+*how to invoke it*. The person who cloned you types one command and watches the
+matrix, with no setup of their own.
 
 ## Two test tiers
 
@@ -418,6 +448,27 @@ The Caddy example in full lives in `examples/caddy/`.
   apps (`nix run .#distro-<name>`) on a KVM host. This repo is private, so its
   Actions are billed: the matrix runs on hokkaido, and CI stays the pure gate.
   Flip the repo public for free Actions if you want one distro in CI too.
+
+## Limitations
+
+Know what mayfly is not before you reach for it.
+
+- Nix required. mayfly is a Nix tool: you run it with `nix run`, and the config
+  is a Nix module. There is no standalone, non-Nix binary today. The audience is
+  Nix users (which is fine: it is the real-distro companion to `runNixOSTest`,
+  which only boots NixOS).
+- A Linux host with KVM. It boots real VMs, so it needs a Linux machine with
+  `/dev/kvm`. It does not run on macOS, and it does not run in KVM-less CI
+  (standard GitHub Actions runners have no nested virtualisation). A Linux box
+  you control is its home.
+- x86_64-linux only, for now. The catalog images and the flake target x86_64.
+  aarch64 is a catalog-and-image question, not a design one.
+- Ephemeral and binary modes only, for now. Every run boots a fresh VM; the
+  warm-pool daemon that makes re-runs seconds is on the roadmap. The subject is a
+  pre-built binary; the clone-the-source-and-build-in-guest mode is on the
+  roadmap too.
+- NixOS guests are not in the catalog. For a NixOS guest, `runNixOSTest` is the
+  right tool; mayfly is for the distros it cannot boot.
 
 ## Roadmap
 
