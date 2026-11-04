@@ -20,6 +20,25 @@ check:
     gofumpt -l .
     nix flake check
 
+# Fuzz every parser that reads input the engine does not control (the audit
+# log, a subject's OCSF jsonl, a distro's tool output, the guest serial log).
+# Count-bounded (execs, not wall-clock) so a CI smoke is deterministic; the
+# seed corpus alone runs under `just test`. Override the budget with N:
+#   just fuzz              # 50000 execs/target (CI smoke)
+#   just fuzz 5000000x     # a longer local sweep
+fuzz N='50000x':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export CGO_ENABLED=0
+    for t in FuzzAuditExe FuzzAuditInt FuzzProcTreeDescendants FuzzOCSF FuzzPinDNFRepo FuzzTextHelpers; do
+        echo "=== oracle $t ({{N}}) ==="
+        go test -run='^$' -fuzz="^$t\$" -fuzztime={{N}} ./internal/oracle
+    done
+    echo "=== distrocheck FuzzParseStages ({{N}}) ==="
+    go test -run='^$' -fuzz='^FuzzParseStages$' -fuzztime={{N}} ./cmd/distrocheck
+    echo "=== matrix FuzzLastReport ({{N}}) ==="
+    go test -run='^$' -fuzz='^FuzzLastReport$' -fuzztime={{N}} ./cmd/matrix
+
 # Regenerate the committed distro table from the catalog.
 readme:
     nix run .#readme > distros/TABLE.md
