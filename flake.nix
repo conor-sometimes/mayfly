@@ -100,6 +100,25 @@
         test = ./smoke/smoke.sh;
       };
 
+      # The demo: zero input. Boots ubuntu-2404, installs a package, drops the
+      # tiny hello subject, runs a check, prints the green matrix, tears down.
+      # `nix run github:conor-sometimes/mayfly#demo`.
+      demo = dmlib.mkMatrix {
+        inherit pkgs;
+        distros = { ubuntu-2404.enable = true; };
+        subjects.hello = { binary = "${helloPkg}/bin/hello"; packages = [ "curl" ]; };
+        test = ./smoke/smoke.sh;
+      };
+      demoApp = pkgs.writeShellApplication {
+        name = "mayfly-demo";
+        text = ''
+          echo "mayfly demo: booting Ubuntu 24.04, installing a package, running a check, tearing down."
+          echo "(needs KVM; one command, zero setup)"
+          echo
+          exec ${demo.apps.matrix.program} "$@"
+        '';
+      };
+
       # The oracle's unit tests, run in the Nix sandbox (pure, no network, no KVM).
       goTest = pkgs.runCommand "mayfly-gotest"
         { nativeBuildInputs = [ pkgs.go ]; } ''
@@ -157,6 +176,7 @@
       apps.${system} = smoke.apps // {
         default = { type = "app"; program = lib.getExe defaultApp; };
         mayfly = { type = "app"; program = lib.getExe defaultApp; };
+        demo = { type = "app"; program = lib.getExe demoApp; };
         readme = { type = "app"; program = lib.getExe readmeApp; };
       };
 
