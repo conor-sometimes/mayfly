@@ -17,6 +17,7 @@ in
   distros = {
     ubuntu-2404.enable = true;
     fedora-44.enable = true;
+    rocky-9.enable = true;
   };
 
   install = {
