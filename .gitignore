@@ -1,0 +1,6 @@
+result
+result-*
+/distrocheck
+/matrix
+*.test
+.direnv/

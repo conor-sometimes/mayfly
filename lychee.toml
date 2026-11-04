@@ -1,0 +1,9 @@
+# lychee link checker config. The distro image URLs are vendor mirrors that can
+# rate-limit or redirect (Conor hit the cloud.debian.org allowlist before), so
+# accept the redirect and rate-limit statuses and give each a real timeout.
+max_redirects = 10
+timeout = 30
+max_retries = 2
+retry_wait_time = 5
+accept = [200, 206, 301, 302, 307, 308, 429]
+user_agent = "curl/8.0 distro-matrix-lychee"

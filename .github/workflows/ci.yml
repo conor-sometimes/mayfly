@@ -1,0 +1,63 @@
+# CI: the pure gate only (Go tests, formatting, flake eval, link check). The VM
+# runs need KVM and a relaxed Nix sandbox; they run on hokkaido via the matrix
+# apps, not here. This repo is private, so its Actions are billed: keep it light.
+# (Flip the repo public for free Actions if you want the matrix in CI too, per
+# the README "Requirements" section.)
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Build and test
+        run: |
+          CGO_ENABLED=0 go build ./...
+          go test ./...
+
+      - name: gofumpt
+        run: |
+          go install mvdan.cc/gofumpt@v0.7.0
+          test -z "$(gofumpt -l .)"
+
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+
+      - name: nix flake check
+        run: nix flake check --no-build || nix flake check
+
+      - name: Link check (distro images and docs)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --config lychee.toml README.md
+          fail: true
+
+  # A single-distro gate on a KVM-capable hosted runner. Disabled by default
+  # (the full matrix runs on hokkaido); enable by removing the `if: false`.
+  one-distro:
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: KVM for the runner user
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+      - name: Smoke on Ubuntu 24.04
+        run: nix run .#distro-ubuntu-2404
