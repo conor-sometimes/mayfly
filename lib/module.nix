@@ -105,12 +105,6 @@ in
       description = "The sudo user the harness provisions and connects as.";
     };
 
-    parallel = mkOption {
-      type = types.int;
-      default = 0;
-      description = "Max distros booted at once; 0 bounds by host CPU and RAM.";
-    };
-
     keepWorkDir = mkOption {
       type = types.bool;
       default = false;

@@ -356,8 +356,8 @@ Splice `apps` and `checks` into your own flake with `//`.
 
 ### Options reference
 
-The full option set (distros, install, installs, test, checks, parallelism,
-teardown, timeouts, ssh user) is declared in `lib/module.nix` and type-checked
+The full option set (distros, install, installs, test, checks, teardown,
+timeouts, ssh user) is declared in `lib/module.nix` and type-checked
 at eval. The reference is generated from that schema, so it never drifts:
 
 ```sh

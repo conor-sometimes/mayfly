@@ -150,10 +150,12 @@ let
 
   # --- the app: the host runner, wrapped with its tools and a backstop trap ---
   runtime = [ pkgs.qemu pkgs.xorriso pkgs.openssh pkgs.coreutils ];
-  # Defaulted options become flags; a user flag after them still wins.
+  # Defaulted options become flags; a user flag after them still wins. The runner
+  # bounds concurrency by host CPU and RAM on its own; `-parallel N` caps it, a
+  # bare CLI flag for the rare case (nix run .#matrix -- -parallel 2), not an
+  # option - the default is always right.
   cfgArgs = lib.concatStringsSep " " (
-    lib.optional (cfg.parallel > 0) "-parallel ${toString cfg.parallel}"
-    ++ lib.optional cfg.keepWorkDir "-keep"
+    lib.optional cfg.keepWorkDir "-keep"
     ++ [
       "-boot-timeout ${cfg.timeouts.boot}"
       "-ssh-timeout ${cfg.timeouts.ssh}"
