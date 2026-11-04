@@ -1,8 +1,8 @@
-# CI: the pure gate only (Go tests, formatting, flake eval, link check). The VM
-# runs need KVM and a relaxed Nix sandbox; they run on hokkaido via the matrix
-# apps, not here. This repo is private, so its Actions are billed: keep it light.
-# (Flip the repo public for free Actions if you want the matrix in CI too, per
-# the README "Requirements" section.)
+# CI. This repo is public, so Actions are free: run the full code gate here.
+# `nix flake check` covers the Go unit + race suites, the evalModules schema
+# check and the README table; the lint job adds the static-analysis + security
+# battery; one-distro boots a real VM on a KVM-capable hosted runner. The full
+# 8-distro matrix runs on a dedicated KVM host via the `.#matrix` apps, not here.
 name: ci
 
 on:
@@ -44,11 +44,39 @@ jobs:
             --config lychee.toml README.md
           fail: true
 
-  # A single-distro gate on a KVM-capable hosted runner. Disabled by default
-  # (the full matrix runs on hokkaido); enable by removing the `if: false`.
-  one-distro:
-    if: false
+  # The static-analysis + security battery (matches the family's bar). Free on a
+  # public repo, so it runs on every push now.
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: vet + staticcheck + errcheck
+        run: |
+          go vet ./...
+          go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
+          go install github.com/kisielk/errcheck@latest && errcheck ./...
+      - name: gosec
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          # G204 (subprocess) and G304/G703 (reading a config-named path) are
+          # inherent to a VM-orchestration tool; see the justfile.
+          gosec -quiet -exclude=G204,G304,G703 ./...
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  # A real single-distro smoke on a KVM-capable hosted runner: the actual
+  # boot -> provision -> check -> teardown lifecycle, in CI, for free. Marked
+  # continue-on-error so a runner without usable nested KVM does not redden CI
+  # (the authoritative matrix runs on a dedicated KVM host); drop that once a
+  # run confirms the hosted runner boots it.
+  one-distro:
+    runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: KVM for the runner user
@@ -58,6 +86,8 @@ jobs:
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
       - uses: cachix/install-nix-action@v30
         with:
-          extra_nix_config: "experimental-features = nix-command flakes"
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = kvm nixos-test benchmark big-parallel
       - name: Smoke on Ubuntu 24.04
         run: nix run .#distro-ubuntu-2404
