@@ -21,9 +21,12 @@ in
 {
   distros = {
     ubuntu-2404.enable = true;
+    ubuntu-2204.enable = true;
     debian-13.enable = true;
     fedora-44.enable = true;
     rocky-9.enable = true;
+    alma-10.enable = true;
+    amazonlinux-2023.enable = true;
     opensuse-leap-16.enable = true;
   };
   concurrency = 1;

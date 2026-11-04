@@ -15,9 +15,10 @@ else's software: *does the binary you ship actually run everywhere?*
 nix run .#matrix
 ```
 
-It boots Ubuntu, Debian, Fedora, Rocky and openSUSE (apt / dnf / zypper), one at
-a time, installs `caddy_2.11.8`, starts it as a `DynamicUser` unit on `:8080`,
-and checks `curl` gets the expected response on each.
+It boots Ubuntu 22.04/24.04, Debian, Fedora, Rocky, AlmaLinux, Amazon Linux and
+openSUSE (apt / dnf / zypper), one at a time, installs `caddy_2.11.8`, starts it
+as a `DynamicUser` unit on `:8080`, and checks `curl` gets the expected response
+on each.
 
 ## What it exercises
 
