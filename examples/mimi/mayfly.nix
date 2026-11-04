@@ -4,15 +4,18 @@
 # events as OCSF-shaped JSON (the mimi/2 schema banken ingests) to a sink file.
 #
 # This matrix installs the fully-static musl ship binary as a hardened systemd
-# unit, boots Ubuntu 24.04, and asserts the probe loads off Ubuntu's kernel and
-# a fresh canary exec is captured end to end. Ubuntu only for now (the walking
-# skeleton); other distros are one `.enable = true` each once this is green.
+# unit, boots each distro, and asserts the probe loads off that kernel's own BTF
+# and a fresh canary exec is captured end to end. Three distros: Ubuntu (6.8),
+# Fedora (newest) and Rocky (5.14, RHEL-backported BTF). Fedora and Rocky run
+# SELinux enforcing, a real test of the hardened unit's eBPF load on each.
 #
 # A mayfly module. The example flake (flake.nix) injects `mimi` (its repo as a
-# flake input) and `pkgs`. See README.md: this needs the mimi repo reachable.
-{ mimi, pkgs, ... }:
+# flake input). See README.md: this needs the mimi repo reachable.
+{ mimi, ... }:
 {
   distros.ubuntu-2404.enable = true;
+  distros.fedora-44.enable = true;
+  distros.rocky-9.enable = true;
 
   install = {
     # The fully-static musl build (copy-and-run on non-NixOS): the bytes mimi
@@ -26,7 +29,7 @@
     unit = ./mimi.service;
   };
 
-  # Exit 0 = the unit stayed up, the probe loaded off Ubuntu's BTF, and the
+  # Exit 0 = the unit stayed up, the probe loaded off this distro's BTF, and the
   # canary exec was captured as a mimi/2 OCSF event. See check.sh.
   test = ./check.sh;
 }
