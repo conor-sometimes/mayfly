@@ -2,11 +2,13 @@
 | Distro | Attr | Package manager | Family |
 | --- | --- | --- | --- |
 | AlmaLinux 10 | `alma-10` | dnf | rhel |
+| AlmaLinux 8 | `alma-8` | dnf | rhel |
 | Amazon Linux 2023 | `amazonlinux-2023` | dnf | rhel |
 | Arch Linux | `arch` | pacman | arch |
 | Debian 13 | `debian-13` | apt | debian |
 | Fedora 44 | `fedora-44` | dnf | rhel |
 | openSUSE Leap 16 | `opensuse-leap-16` | zypper | suse |
+| Rocky 8 | `rocky-8` | dnf | rhel |
 | Rocky 9 | `rocky-9` | dnf | rhel |
 | Ubuntu 22.04 | `ubuntu-2204` | apt | debian |
 | Ubuntu 24.04 | `ubuntu-2404` | apt | debian |

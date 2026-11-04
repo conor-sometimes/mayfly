@@ -115,11 +115,31 @@ in
       };
     };
 
+    # RHEL 8, kernel 4.18: the oldest enterprise kernel still widely deployed,
+    # and the next CO-RE stress after 5.14 for a tracepoint/BTF consumer.
+    rocky-8 = mkVersion rhel {
+      title = "Rocky 8";
+      image = {
+        url = "https://dl.rockylinux.org/pub/rocky/8/images/x86_64/Rocky-8-GenericCloud-Base-8.10-20240528.0.x86_64.qcow2";
+        sha256 = "e56066c58606191e96184de9a9183a3af33c59bcbd8740d8b10ca054a7a89c14";
+      };
+    };
+
     alma-10 = mkVersion rhel {
       title = "AlmaLinux 10";
       image = {
         url = "https://repo.almalinux.org/almalinux/10/cloud/x86_64/images/AlmaLinux-10-GenericCloud-10.2-20261012.0.x86_64.qcow2";
         sha256 = "cbee4726fc0f5a60694bb4f289003cc221e715dfbacebcce76b54daf386d8eca";
+      };
+      packages = { auditctl = "audit-rules"; };
+    };
+
+    # RHEL 8, kernel 4.18 (see rocky-8).
+    alma-8 = mkVersion rhel {
+      title = "AlmaLinux 8";
+      image = {
+        url = "https://repo.almalinux.org/almalinux/8/cloud/x86_64/images/AlmaLinux-8-GenericCloud-8.10-20261026.x86_64.qcow2";
+        sha256 = "e9e4e53fa4e9aef65ec6d16e80f1d18acbe1d1a44a47550f9095c4b1ca31f0d7";
       };
       packages = { auditctl = "audit-rules"; };
     };
@@ -158,6 +178,7 @@ in
         sha256 = "08754e28d91b1680086c6211ef4df13559e766fff7cdb4006489b14b5d281f08";
       };
     };
+
 
     # NixOS as the ninth attribute is roadmap: its image is a derivation
     # (a cloud-init qcow2 from config.system.build), not a vendor URL. The
