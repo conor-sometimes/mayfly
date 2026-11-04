@@ -119,12 +119,14 @@
         '';
       };
 
-      # The oracle's unit tests, run in the Nix sandbox (pure, no network, no KVM).
+      # The Go unit tests (oracle + engine), run in the Nix sandbox (pure, no
+      # network, no KVM). CGO off so the pure-Go cmd packages build without a C
+      # compiler in the sandbox.
       goTest = pkgs.runCommand "mayfly-gotest"
         { nativeBuildInputs = [ pkgs.go ]; } ''
-        export HOME="$TMPDIR" GOCACHE="$TMPDIR/gocache" GOFLAGS=-mod=mod GOPROXY=off
+        export HOME="$TMPDIR" GOCACHE="$TMPDIR/gocache" GOFLAGS=-mod=mod GOPROXY=off CGO_ENABLED=0
         cp -r ${self} src && chmod -R u+w src && cd src
-        go test ./internal/... | tee "$out"
+        go test ./... | tee "$out"
       '';
 
       # The generated distro table: every entry in the shipped catalog, one row.
