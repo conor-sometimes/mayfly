@@ -98,6 +98,9 @@ Installed, it is just `mayfly`. Each distro either goes green or tells you
 exactly which phase broke and why. A runnable sample is in
 [`examples/quickstart/`](./examples/quickstart/).
 
+Want to see it with zero setup first? `nix run github:conor-sometimes/mayfly#demo`
+boots Ubuntu 24.04, installs a package, runs a check, and tears the VM down.
+
 ### No file at all
 
 For a one-off with no `mayfly.nix`, pass the same fields as flags:
@@ -390,6 +393,7 @@ bytes the project ships, on the distro the vendor ships.
 
 | Project | Kind | The check | Why it is a distro question |
 | --- | --- | --- | --- |
+| hitomi | YARA scanner | the EICAR suite: 100% TP, 0% FP | the shipped musl binary's accuracy on each distro ([`examples/hitomi/`](./examples/hitomi/)) |
 | Caddy | web server | `curl localhost` returns `ok` | binding :80 as a service user under each distro's systemd |
 | node_exporter | metrics agent | `/metrics` has the systemd collector | reads `/proc`, `/sys` and D-Bus; each distro's bus policy |
 | Vector | log pipeline | a journald source reaches a file sink | shells out to each distro's `journalctl` |
