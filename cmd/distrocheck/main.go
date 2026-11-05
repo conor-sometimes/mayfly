@@ -804,6 +804,13 @@ func (c *checker) shPID(timeout time.Duration, name string, args ...string) (str
 		for _, k := range []string{"http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"} {
 			cmd.Env = append(cmd.Env, k+"="+c.cfg.Proxy)
 		}
+		// Never proxy loopback: a check almost always curls the service it just
+		// started on 127.0.0.1, and routing that through the host proxy fails
+		// confusingly (hit in the caddy example). Exempt localhost so test/setup
+		// scripts reach their own service without a --noproxy workaround.
+		for _, k := range []string{"no_proxy", "NO_PROXY"} {
+			cmd.Env = append(cmd.Env, k+"=localhost,127.0.0.1,::1")
+		}
 	}
 	out, err := cmd.CombinedOutput()
 	pid := 0

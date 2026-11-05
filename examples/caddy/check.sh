@@ -18,12 +18,12 @@ for _ in $(seq 1 30); do
 done
 [ "$(systemctl is-active caddy.service 2>/dev/null)" = active ] || fail "caddy.service is not active"
 
-# The shipped binary actually serves the page. --noproxy: the harness exports
-# http_proxy for package installs, and without this curl would route a localhost
-# request through that proxy and fail.
+# The shipped binary actually serves the page. The harness exempts loopback from
+# the package-install proxy (no_proxy=localhost,127.0.0.1,::1), so a plain curl
+# to 127.0.0.1 reaches caddy directly.
 out=""
 for _ in $(seq 1 30); do
-  out="$(curl --noproxy '*' -fsS http://127.0.0.1:8080/ 2>/dev/null)" && break
+  out="$(curl -fsS http://127.0.0.1:8080/ 2>/dev/null)" && break
   sleep 1
 done
 printf '%s' "$out" | grep -q "mayfly-caddy-ok" || fail "unexpected response: '${out}'"
