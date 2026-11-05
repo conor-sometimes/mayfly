@@ -48,6 +48,13 @@ const (
 )
 
 func main() {
+	// The same binary is the in-guest `mayfly` CLI (spec 9): if the first argument
+	// is a reporting verb, act as the CLI. Otherwise run the engine (the host
+	// invokes `distrocheck -root ...`).
+	if len(os.Args) > 1 && isCLIVerb(os.Args[1]) {
+		os.Exit(runCLI(os.Args[1:]))
+	}
+
 	root := flag.String("root", "/opt/matrix", "the payload root (config.json and every source path are under it)")
 	flag.Parse()
 

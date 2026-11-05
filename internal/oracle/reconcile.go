@@ -165,3 +165,47 @@ func Reconcile(plan []string, recs []Record, exit int, done bool, badLines []int
 func protoErr(detail string) Verdict {
 	return Verdict{ID: reservedProtocol, Status: Error, Detail: detail}
 }
+
+// ValidID reports whether s is a well-formed check id or info key (spec 3.1):
+// an alphanumeric first byte, then alphanumerics or _ . / - , at most 128 bytes.
+func ValidID(s string) bool {
+	if s == "" || len(s) > 128 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		alnum := (b >= '0' && b <= '9') || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z')
+		if i == 0 {
+			if !alnum {
+				return false
+			}
+			continue
+		}
+		if !alnum && b != '_' && b != '.' && b != '/' && b != '-' {
+			return false
+		}
+	}
+	return true
+}
+
+// Reserved reports whether id is an engine-reserved id a consumer must not report
+// on (spec 3.2): `protocol` and `test`.
+func Reserved(id string) bool { return id == reservedProtocol || id == "test" }
+
+// ResultRecord builds a result record (spec 7.2) for the CLI to append.
+func ResultRecord(id string, status Status, detail string) Record {
+	return Record{Schema: Protocol, T: "result", ID: id, Status: status, Detail: detail}
+}
+
+// InfoRecord builds an info record (spec 7.3).
+func InfoRecord(k, v string) Record {
+	return Record{Schema: Protocol, T: "info", K: k, V: v}
+}
+
+// DoneRecord builds the completion record (spec 7.4) the guest engine writes.
+func DoneRecord(exit int) Record {
+	return Record{Schema: Protocol, T: "done", Exit: exit}
+}
+
+// ProtocolID is the reserved id for engine-synthesised errors about the run.
+const ProtocolID = reservedProtocol
