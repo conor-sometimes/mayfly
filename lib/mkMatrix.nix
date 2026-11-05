@@ -34,8 +34,31 @@ let
 
   subject = cfg.install;
   subjects = cfg.installs;
-  test = cfg.test;
-  checks = cfg.checks;
+
+  # The simple tier (`test`) vs the plan (`entrypoint` + `checks`). Guarded so a
+  # consumer picks one, and xfail is rejected until mayfly/1 implements it (spec
+  # 6.2.3). checkConfig is forced by mkManifest so these throws reach the user.
+  isSugar = cfg.test != null;
+  entrypointSrc = if isSugar then cfg.test else cfg.entrypoint;
+  xfailSet = lib.filterAttrs (_: c: c.xfail) cfg.checks;
+  checkConfig =
+    lib.throwIf (isSugar && (cfg.entrypoint != null || cfg.checks != { }))
+      "mayfly: set `test` (simple tier) OR `entrypoint` + `checks` (the plan), not both"
+      (lib.throwIf (!isSugar && cfg.entrypoint == null)
+        "mayfly: set `test` (simple tier), or `entrypoint` + `checks` (the plan)"
+        (lib.throwIf (xfailSet != { })
+          "mayfly: xfail is not implemented in mayfly/1 (spec 6.2.3); remove it from: ${lib.concatStringsSep ", " (lib.attrNames xfailSet)}"
+          null));
+
+  # Plan entries (spec 4.2). `test` sugar is the single reserved id; otherwise one
+  # entry per `checks` attr, in attr order, filterable per distro by `when`.
+  planEntry = id: c: { inherit id; xfail = c.xfail; };
+  fullPlan =
+    if isSugar then [ { id = "test"; xfail = false; } ]
+    else lib.mapAttrsToList planEntry cfg.checks;
+  planForDistro = d:
+    if isSugar then [ { id = "test"; xfail = false; } ]
+    else lib.mapAttrsToList planEntry (lib.filterAttrs (_: c: c.when d) cfg.checks);
 
   imageOf = d:
     if d.image ? drv then d.image.drv pkgs
@@ -43,9 +66,8 @@ let
       pkgs.fetchurl ({ inherit (d.image) url; }
         // (if d.image ? sha512 then { inherit (d.image) sha512; } else { inherit (d.image) sha256; }));
 
-  # --- normalize the consumer's subjects and checks ---
+  # --- normalize the consumer's subjects ---
   subjectSet = (lib.optionalAttrs (subject != null) { ${subject.name or "subject"} = subject; }) // subjects;
-  checkSet = (lib.optionalAttrs (test != null) { test = { kind = "exit"; run = test; }; }) // checks;
 
   # --- the Go binaries: distrocheck (guest) and matrix (host), static ---
   tools = pkgs.buildGoModule {
@@ -85,34 +107,15 @@ let
         setup = if hasSetup then "subjects/${name}/setup" else "";
         enable = (lib.optionals (s.start or true) (map baseNameOf unitFiles)) ++ (s.enable or [ ]);
         packages = s.packages or [ ];
-        ocsf = s.ocsf or "";
-        scan = s.scan or [ ];
       };
     };
 
-  checkModel = id: c: {
-    copies = lib.optional (c ? run && c.run != null) { rel = "checks/${id}/run"; src = c.run; mode = "0755"; };
-    # the manifest entry, minus the `when` predicate (resolved per distro in Nix)
-    manifest = {
-      inherit id;
-      kind = c.kind;
-      run = if c ? run && c.run != null then "checks/${id}/run" else "";
-      as = c.as or "";
-      expect = c.expect or [ ];
-      ids = c.ids or [ ];
-      unit = c.unit or "";
-      match = c.match or "";
-      tools = c.tools or [ ];
-      optional = c.optional or false;
-    };
-    when = c.when or (_: true);
-  };
-
   subjectModels = lib.mapAttrsToList subjectModel subjectSet;
-  checkModels = lib.mapAttrs checkModel checkSet;
 
-  allCopies = lib.concatMap (m: m.copies) subjectModels
-    ++ lib.concatLists (lib.mapAttrsToList (_: m: m.copies) checkModels);
+  # The consumer's one entrypoint, staged at a fixed payload path.
+  entrypointCopy = { rel = "entrypoint"; src = entrypointSrc; mode = "0755"; };
+
+  allCopies = lib.concatMap (m: m.copies) subjectModels ++ [ entrypointCopy ];
 
   # --- the payload: distrocheck plus every source file, at the paths above ---
   payload = pkgs.runCommand "mayfly-payload" { } (''
@@ -124,20 +127,21 @@ let
     '')
     allCopies);
 
-  # per-distro check list: a check applies to a distro only when its `when` is true
-  checksForDistro = d: map (m: m.manifest)
-    (lib.filter (m: m.when d) (lib.attrValues checkModels));
-
   # A manifest over an explicit distro list. Only the images of the distros it
   # names are interpolated, so building it realizes only those images -- a
   # per-distro manifest fetches one image, not the whole catalog. That keeps a
   # single-distro run (`nix run .#distro-ubuntu-2404`, the CI smoke) cheap and,
   # crucially, independent of every other distro's image: one stale catalog URL
-  # can no longer break an unrelated distro's run.
-  mkManifest = distros: {
+  # can no longer break an unrelated distro's run. checkConfig is forced here so
+  # the config guards (test-xor-plan, xfail) reach the user.
+  mkManifest = distros: builtins.seq checkConfig {
     payload = "${payload}";
     subjects = map (m: m.manifest) subjectModels;
-    checks = map (m: m.manifest) (lib.attrValues checkModels); # shared default
+    entrypoint = "entrypoint";
+    plan = fullPlan;
+    test_sugar = isSugar;
+    test_user = cfg.testUser;
+    audit = cfg.audit;
     distros = map
       (d: {
         inherit (d) name pm family packages;
@@ -148,7 +152,7 @@ let
           cpus = d.boot.cpus or 0;
           disk = d.boot.disk or 0;
         };
-        checks = checksForDistro d;
+        plan = planForDistro d;
       })
       distros;
   };

@@ -1,7 +1,8 @@
 # The mayfly options schema. A run is a module: the user writes a mayfly.nix
-# (distros, install, test), evalModules type-checks it, and the runner executes
-# the result. A wrong field fails at eval with a clear message. The README
-# options reference is generated from this schema.
+# (distros, install, and either a `test` script or an `entrypoint` + `checks`
+# plan), evalModules type-checks it, and the runner executes the result. A wrong
+# field fails at eval with a clear message. The README reference is generated from
+# this schema. The in-guest contract is docs/protocol.md (mayfly/1).
 { lib, catalogSet, ... }:
 let
   inherit (lib) mkOption mkEnableOption types;
@@ -58,11 +59,26 @@ let
       units = mkOption { type = types.listOf types.path; default = [ ]; description = "Several unit files."; };
       files = mkOption { type = types.attrsOf types.path; default = { }; description = "{ \"/guest/path\" = ./source; } copied verbatim."; };
       packages = mkOption { type = types.listOf types.str; default = [ ]; description = "Generic package names installed first, per distro."; };
-      start = mkOption { type = types.bool; default = true; description = "Enable and start this install's units by default (a daemon). Set false to install but not start (banken's oneshot, driven by `scan`)."; };
+      start = mkOption { type = types.bool; default = true; description = "Enable and start this install's units by default (a daemon). Set false to install but not start (a oneshot a check drives)."; };
       enable = mkOption { type = types.listOf types.str; default = [ ]; description = "Extra units to `systemctl enable --now` beyond this install's own."; };
       setup = mkOption { type = types.nullOr types.path; default = null; description = "A script run once as root after files land."; };
-      ocsf = mkOption { type = types.str; default = ""; description = "Glob of OCSF jsonl findings this install writes (for detect checks)."; };
-      scan = mkOption { type = types.listOf types.str; default = [ ]; description = "Command to drive a batch install once (banken's oneshot scan)."; };
+    };
+  };
+
+  # A plan entry (spec 4.2): the attr name is the check id; the value sets an
+  # optional `when` predicate on the distro and the optional `xfail` modifier.
+  checkModule = {
+    options = {
+      when = mkOption {
+        type = types.unspecified;
+        default = (_: true);
+        description = "A predicate on the distro attrs; false excludes this id from that distro's plan (rendered '-').";
+      };
+      xfail = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Expected-failure modifier (spec 6.2). Not implemented in mayfly/1; setting it is an eval error for now.";
+      };
     };
   };
 in
@@ -84,19 +100,37 @@ in
     installs = mkOption {
       type = types.attrsOf (types.submodule subjectModule);
       default = { };
-      description = "Named installs, provisioned in order, when a run needs more than one thing on each guest (banken's matrix installs mimi and banken).";
+      description = "Named installs, provisioned in order, when a run needs more than one thing on each guest.";
     };
 
     test = mkOption {
       type = types.nullOr (types.either types.path types.str);
       default = null;
-      description = "A script run in-guest after the install is up; exit 0 is a pass (the simple tier).";
+      description = "The simple tier: one in-guest script, exit 0 is a pass (spec 4.5). Mutually exclusive with `entrypoint`/`checks`.";
+    };
+
+    entrypoint = mkOption {
+      type = types.nullOr (types.either types.path types.str);
+      default = null;
+      description = "The one in-guest script the engine runs; it reports each id in `checks` through the `mayfly` CLI (spec 8). Pair with `checks`.";
     };
 
     checks = mkOption {
-      type = types.attrsOf types.attrs;
+      type = types.attrsOf (types.submodule checkModule);
       default = { };
-      description = "Structured checks (detect, script, sandbox, lsm). Free-form per check; `when` may be a predicate on the distro.";
+      description = "The plan: one entry per check id the entrypoint will report, each with an optional `when` and `xfail` (spec 4).";
+    };
+
+    audit = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Enable auditd, strip `-a task,never`, and load a subject's shipped audit rules after its files land (for detection via `mayfly detect`).";
+    };
+
+    testUser = mkOption {
+      type = types.str;
+      default = "";
+      description = "Provision this unprivileged user and open the payload to it; exported as $MAYFLY_TEST_USER (for `mayfly detect --as`).";
     };
 
     sshUser = mkOption {
