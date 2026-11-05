@@ -20,13 +20,17 @@ openSUSE (apt / dnf / zypper), one at a time, installs `caddy_2.11.8`, starts it
 as a `DynamicUser` unit on `:8080`, and checks `curl` gets the expected response
 on each.
 
+Proven green on all 8 distros (setup + test PASS on Ubuntu 22.04/24.04, Debian 13,
+Fedora 44, Rocky 9, AlmaLinux 10, Amazon Linux 2023, openSUSE Leap 16) on a KVM
+host, 2026-11-05.
+
 ## What it exercises
 
 - `fetchRelease` - the no-build path: the exact bytes Caddy publishes, pinned by
   sha256, not a nixpkgs rebuild.
 - a real systemd unit (`caddy.service`) installed, enabled and started per distro.
-- a package the check needs (`curl`), installed through each distro's own
-  package manager via the generic-name map.
+- the check reaching the running service on loopback (`curl http://127.0.0.1:8080`)
+  directly, since the harness exempts localhost from its package-install proxy.
 
 ## Updating the version
 
