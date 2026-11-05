@@ -416,6 +416,19 @@ func (c *checker) provision() error {
 	if out, err := c.sh(time.Minute, "useradd", "-m", testUser); err != nil && !strings.Contains(out, "exists") {
 		return fmt.Errorf("useradd %s: %w: %s", testUser, err, out)
 	}
+	// A detect check's emulation is launched as that unprivileged user, but the
+	// payload (distrocheck + the check scripts) is staged under the run user's
+	// home, which useradd makes 0700. Without this the test user cannot even
+	// traverse to the script and every as="user" emulation dies with "Permission
+	// denied" before it runs -- so nothing is ever detected. Open the traversal
+	// path to the payload root and make its tree world-readable/executable
+	// (o+rX: dirs and already-executable files only). Harmless in a throwaway VM.
+	for dir := c.root; dir != "/" && dir != "." && dir != ""; dir = filepath.Dir(dir) {
+		_, _ = c.sh(time.Minute, "chmod", "o+x", dir)
+	}
+	if _, err := c.sh(time.Minute, "chmod", "-R", "o+rX", c.root); err != nil {
+		return fmt.Errorf("open payload to %s: %w", testUser, err)
+	}
 	for _, s := range c.cfg.Subjects {
 		if err := c.provisionSubject(s); err != nil {
 			return fmt.Errorf("subject %s: %w", s.Name, err)
