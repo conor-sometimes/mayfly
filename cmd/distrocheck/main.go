@@ -592,13 +592,20 @@ func (c *checker) detect(ck report.CheckSpec) {
 	c.drainQuiescent() // a prior check's late exec lands in the pre-count, not this check's fired set
 	before := len(c.findings())
 	auditBefore := auditLineN()
-	out, launcher := c.runEmulation(ck)
+	out, launcher, emulExit := c.runEmulation(ck)
 	if strings.Contains(out, emulSkip) {
 		c.skip(ck.ID, oracle.FirstLine(strings.TrimSpace(out)))
 		return
 	}
 	c.drainQuiescent() // this check's own late-flushing exec is counted
 	subtree := oracle.Descendants(oracle.AuditProcTree(auditSince(auditBefore)), launcher)
+	// The emulation's exit status is evidence: if the launcher could not run the
+	// attack at all, the subtree is empty and nothing fires -- which, against an
+	// empty expect set, would otherwise read as a (vacuous) PASS. Fail instead.
+	if ran, why := oracle.EmulationRan(emulExit, len(subtree)); !ran {
+		c.check(ck.ID, false, "emulation did not run: "+why+": "+oracle.LastLines(out, 2))
+		return
+	}
 	fired := map[string]bool{}
 	offending := map[string]string{}
 	for _, line := range oracle.From(c.findings(), before) {
@@ -642,19 +649,33 @@ func (c *checker) detect(ck report.CheckSpec) {
 // runEmulation runs a detect check's script under a launcher process whose pid
 // roots the check's subtree. as="root" launches directly; as="user" (default)
 // goes through runuser, with a login-style PATH so tools in sbin resolve.
-func (c *checker) runEmulation(ck report.CheckSpec) (string, int) {
+func (c *checker) runEmulation(ck report.CheckSpec) (out string, pid, exit int) {
 	script := c.src(ck.Run)
-	var out string
-	var pid int
+	var err error
 	if ck.As == "root" {
-		out, pid, _ = c.shPID(2*time.Minute, "bash", script)
+		out, pid, err = c.shPID(2*time.Minute, "bash", script)
 	} else {
 		const loginPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-		out, pid, _ = c.shPID(2*time.Minute, "runuser", "-u", testUser, "--", "bash", "-c",
+		out, pid, err = c.shPID(2*time.Minute, "runuser", "-u", testUser, "--", "bash", "-c",
 			"export PATH="+loginPath+":$PATH; bash "+script)
 	}
 	time.Sleep(time.Second) // let auditd write the records
-	return out, pid
+	return out, pid, exitStatus(err)
+}
+
+// exitStatus maps a launched command's error to an exit code: 0 on success, the
+// process's own code on a normal non-zero exit, and -1 for a non-exit failure
+// (timeout, could not start). The emulation's exit status is evidence: a detect
+// check cannot tell "ran, fired nothing" from "never ran" without it.
+func exitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode()
+	}
+	return -1
 }
 
 // script runs a stage script as root and parses its "<id> PASS|FAIL|SKIP <detail>"
