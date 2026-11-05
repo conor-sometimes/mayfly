@@ -201,21 +201,19 @@ func runLsm(args []string) int {
 	if !inPlan(id) {
 		return unplanned(id, "id "+id+" is not in MAYFLY_PLAN")
 	}
+	// A source is "available" if its tool exists; a non-zero exit from ausearch
+	// or journalctl -g just means no matching line (grep semantics), not an error.
+	if !have("ausearch") && !have("journalctl") {
+		return appendRecord(oracle.ResultRecord(id, oracle.Error, "no LSM log source: neither ausearch nor journalctl is present"))
+	}
 	var denials []string
-	readable := false
 	if have("ausearch") {
-		out, err := psh(time.Minute, "ausearch", "-m", "AVC,USER_AVC", "-ts", "boot", "-i")
-		if err == nil {
-			readable = true
-		}
+		out, _ := psh(time.Minute, "ausearch", "-m", "AVC,USER_AVC", "-ts", "boot", "-i")
 		denials = append(denials, oracle.LinesContaining(out, *match)...)
 	}
-	if out, err := psh(time.Minute, "journalctl", "-k", "--no-pager", "-g", `apparmor="DENIED"`); err == nil {
-		readable = true
+	if have("journalctl") {
+		out, _ := psh(time.Minute, "journalctl", "-k", "--no-pager", "-g", `apparmor="DENIED"`)
 		denials = append(denials, oracle.LinesContaining(out, *match)...)
-	}
-	if !readable {
-		return appendRecord(oracle.ResultRecord(id, oracle.Error, "no LSM log source readable (ausearch and journalctl both failed)"))
 	}
 	if len(denials) > 0 {
 		return appendRecord(oracle.ResultRecord(id, oracle.Fail, "denials: "+strings.Join(oracle.FirstN(denials, 3), " | ")))
