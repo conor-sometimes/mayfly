@@ -1,32 +1,32 @@
 // Package report is the distro matrix's wire format: the JSON config the host
-// runner (cmd/matrix) hands the in-guest oracle (cmd/distrocheck), and the JSON
-// report the oracle hands back. Typed both ways, so neither side scrapes text.
+// runner (cmd/matrix) hands the in-guest engine (cmd/distrocheck), and the JSON
+// report the engine hands back. Typed both ways, so neither side scrapes text.
 //
 // The report travels on SSH stdout, not a raw disk, so there is no size cap to
-// fit: a report is whatever JSON the oracle prints on its last line.
+// fit: a report is whatever JSON the engine prints on its last line. The records
+// a consumer's entrypoint produces (docs/protocol.md) are a separate, internal
+// wire the engine reconciles into these Checks before it reports.
 package report
 
 // Report is one distro's result.
 type Report struct {
 	Distro string            `json:"distro"`
-	Info   map[string]string `json:"info"`   // recorded, not judged: versions, LSM mode, quirks
-	Checks []Check           `json:"checks"` // one per check, in run order
+	Info   map[string]string `json:"info"`   // recorded, not judged: versions, LSM mode, quirks, info records
+	Checks []Check           `json:"checks"` // one rendered verdict per planned id, in plan order
 }
 
-// Check is one check's verdict on one distro. ID is the check's attr name
-// ("revshell", "sandbox", "sysmon"); for a script check that reports several
-// ids, the oracle emits one Check per id ("sysmon/S1").
+// Check is one rendered verdict on one distro (spec 6.3). Status is one of
+// pass|fail|skip|error|xfail|xpass|na ("na" = excluded by `when`, rendered "-").
 type Check struct {
 	ID     string `json:"id"`
-	Pass   bool   `json:"pass"`
-	Skip   bool   `json:"skip,omitempty"` // recorded, not a failure: a missing optional tool, an unserved distro
+	Status string `json:"status"`
 	Detail string `json:"detail,omitempty"`
 }
 
 // Config is what the host hands the guest: how to install on this distro, the
-// subjects to provision, and the checks to run. Every source path is relative
-// to the payload root the runner scps in (distrocheck -root <dir>); every guest
-// path is absolute.
+// subjects to provision, and the plan + entrypoint to run. Every source path is
+// relative to the payload root the runner scps in (distrocheck -root <dir>);
+// every guest path is absolute.
 type Config struct {
 	Distro   string            `json:"distro"`
 	PM       string            `json:"pm"`       // dnf | apt | zypper | pacman
@@ -34,11 +34,34 @@ type Config struct {
 	Packages map[string]string `json:"packages"` // generic command name -> the package providing it here
 	Proxy    string            `json:"proxy"`    // the host's proxy as the guest reaches it; "" for direct
 	Subjects []Subject         `json:"subjects"` // the things under test, provisioned in order
-	Checks   []CheckSpec       `json:"checks"`   // the checks, already sorted by order then name
+
+	// The protocol run (docs/protocol.md). Entrypoint is the one script the
+	// consumer provides; Plan is this distro's applicable ids (when-filtered by
+	// the host, spec 4.3), in order. TestSugar marks the `test` single-script
+	// shorthand (spec 4.5): the entrypoint's exit status is mapped, not records.
+	Entrypoint string      `json:"entrypoint"`
+	Plan       []PlanEntry `json:"plan"`
+	TestSugar  bool        `json:"test_sugar"`
+
+	// Provisioning knobs the engine owns (ordering a consumer script would get
+	// wrong). TestUser, when set, is a provisioned unprivileged user exported as
+	// MAYFLY_TEST_USER. Audit enables auditd, strips `-a task,never`, and loads a
+	// subject's shipped rules after its files land.
+	TestUser string `json:"test_user"`
+	Audit    bool   `json:"audit"`
+}
+
+// PlanEntry is one planned check id (spec 4.2). XFail is the optional modifier
+// (spec 6.2); mayfly/1 rejects it at eval until a consumer needs it, so it is
+// carried but not yet acted on.
+type PlanEntry struct {
+	ID    string `json:"id"`
+	XFail bool   `json:"xfail,omitempty"`
 }
 
 // Subject is one thing under test: a static binary, the files it needs, and how
-// to start and drive it.
+// to start it. Provisioning only; a detect check names the subject's findings
+// and scan command through `mayfly detect` flags, not here.
 type Subject struct {
 	Name        string            `json:"name"`
 	Binary      string            `json:"binary"`       // payload-relative path to the static binary
@@ -47,21 +70,5 @@ type Subject struct {
 	Files       map[string]string `json:"files"`        // absolute guest path -> payload-relative source
 	Setup       string            `json:"setup"`        // payload-relative script, run once as root after files land
 	Enable      []string          `json:"enable"`       // unit names to `systemctl enable --now`
-	Packages    []string          `json:"packages"`     // generic package names installed first, translated through the distro's Packages map (unmapped is an error)
-	OCSF        string            `json:"ocsf"`         // glob of OCSF jsonl findings this subject writes (detect checks read it)
-	Scan        []string          `json:"scan"`         // command that drives a batch subject once (banken's oneshot scan); nil = a running daemon
-}
-
-// CheckSpec is one check. Kind is detect | script | sandbox | lsm.
-type CheckSpec struct {
-	ID       string   `json:"id"`
-	Kind     string   `json:"kind"`
-	Run      string   `json:"run"`      // payload-relative script (detect, script)
-	As       string   `json:"as"`       // detect: "user" (default) or "root"
-	Expect   []string `json:"expect"`   // detect: the exact rule set, sorted; [] means none
-	IDs      []string `json:"ids"`      // script: the ids the script must report
-	Unit     string   `json:"unit"`     // sandbox: the unit to rate
-	Match    string   `json:"match"`    // lsm: the subject name denials are searched for
-	Tools    []string `json:"tools"`    // commands the check needs, resolved through Packages
-	Optional bool     `json:"optional"` // a missing tool skips the check instead of failing the distro
+	Packages    []string          `json:"packages"`     // generic package names installed first, translated through Packages (unmapped is an error)
 }

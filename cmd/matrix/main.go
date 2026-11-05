@@ -49,9 +49,9 @@ type Distro struct {
 	Family   string            `json:"family"`
 	Packages map[string]string `json:"packages"`
 	Boot     Boot              `json:"boot"`
-	// Checks is this distro's own check list, already filtered by each check's
-	// `when` predicate in Nix. When nil the shared Manifest.Checks apply.
-	Checks []report.CheckSpec `json:"checks"`
+	// Plan is this distro's applicable check ids, already filtered by each entry's
+	// `when` predicate in Nix (spec 4.3). When nil the shared Manifest.Plan applies.
+	Plan []report.PlanEntry `json:"plan"`
 }
 
 // Boot overrides an image's resources. Zero values take the defaults.
@@ -65,10 +65,14 @@ type Boot struct {
 // shared subjects and checks. Payload is the dir holding distrocheck and every
 // source file the subjects and checks reference.
 type Manifest struct {
-	Distros  []Distro           `json:"distros"`
-	Subjects []report.Subject   `json:"subjects"`
-	Checks   []report.CheckSpec `json:"checks"`
-	Payload  string             `json:"payload"`
+	Distros    []Distro           `json:"distros"`
+	Subjects   []report.Subject   `json:"subjects"`
+	Entrypoint string             `json:"entrypoint"` // payload-relative; the consumer's one script
+	Plan       []report.PlanEntry `json:"plan"`       // the shared plan, per-distro filtered in Distro.Plan
+	TestSugar  bool               `json:"test_sugar"`
+	TestUser   string             `json:"test_user"`
+	Audit      bool               `json:"audit"`
+	Payload    string             `json:"payload"`
 }
 
 const (
@@ -159,8 +163,6 @@ type runSpec struct {
 	Enable      []string
 	Files       map[string]string
 	Setup       string
-	OCSF        string
-	Scan        []string
 	Test        string
 }
 
@@ -204,7 +206,7 @@ func assembleImpure() (Manifest, error) {
 	}
 	s := report.Subject{
 		Name: name, InstallPath: run.InstallPath, Packages: run.Packages,
-		Enable: run.Enable, OCSF: run.OCSF, Scan: run.Scan, Files: map[string]string{},
+		Enable: run.Enable, Files: map[string]string{},
 	}
 	stage := func(src, rel string) error { return copyInto(src, filepath.Join(payload, rel)) }
 
@@ -250,11 +252,13 @@ func assembleImpure() (Manifest, error) {
 	m.Subjects = []report.Subject{s}
 
 	if run.Test != "" {
-		rel := "checks/test/run"
+		rel := "entrypoint"
 		if err := stage(run.Test, rel); err != nil {
 			return m, fmt.Errorf("stage test: %w", err)
 		}
-		m.Checks = append(m.Checks, report.CheckSpec{ID: "test", Kind: "exit", Run: rel})
+		m.Entrypoint = rel
+		m.TestSugar = true
+		m.Plan = []report.PlanEntry{{ID: "test"}}
 	}
 
 	want := run.Distros
@@ -347,6 +351,30 @@ func runMatrix(m Manifest) int {
 	return summarize(m.Distros, reports)
 }
 
+// renderStatus maps a protocol status to the grid vocabulary (spec 6.3).
+func renderStatus(s string) string {
+	switch s {
+	case "pass":
+		return "PASS"
+	case "fail":
+		return "FAIL"
+	case "skip":
+		return "SKIP"
+	case "error":
+		return "ERROR"
+	case "xfail":
+		return "XFAIL"
+	case "xpass":
+		return "XPASS"
+	case "", "na":
+		return "-"
+	}
+	return strings.ToUpper(s)
+}
+
+// statusFails reports whether a status makes the run fail (spec 6.3).
+func statusFails(s string) bool { return s == "fail" || s == "error" || s == "xpass" }
+
 func summarize(distros []Distro, reports []report.Report) int {
 	failed := 0
 	for i, d := range distros {
@@ -358,14 +386,15 @@ func summarize(distros []Distro, reports []report.Report) int {
 		}
 		distroFailed := false
 		for _, ck := range rep.Checks {
+			r := renderStatus(ck.Status)
 			switch {
-			case ck.Skip:
-				fmt.Printf("--- SKIP: %s/%s %s\n", d.Name, ck.ID, ck.Detail)
-			case ck.Pass:
-				fmt.Printf("--- PASS: %s/%s\n", d.Name, ck.ID)
-			default:
-				fmt.Printf("--- FAIL: %s/%s\n    %s\n", d.Name, ck.ID, ck.Detail)
+			case statusFails(ck.Status):
+				fmt.Printf("--- %s: %s/%s\n    %s\n", r, d.Name, ck.ID, ck.Detail)
 				distroFailed = true
+			case ck.Status == "skip":
+				fmt.Printf("--- SKIP: %s/%s %s\n", d.Name, ck.ID, ck.Detail)
+			default:
+				fmt.Printf("--- %s: %s/%s\n", r, d.Name, ck.ID)
 			}
 		}
 		for _, k := range sortedKeys(rep.Info) {
@@ -418,14 +447,7 @@ func matrixTable(distros []Distro, reports []report.Report) string {
 		}
 		for _, ck := range rep.Checks {
 			if ck.ID == id {
-				switch {
-				case ck.Skip:
-					return "SKIP"
-				case ck.Pass:
-					return "PASS"
-				default:
-					return "FAIL"
-				}
+				return renderStatus(ck.Status)
 			}
 		}
 		return "-"
@@ -689,13 +711,15 @@ func (g *guest) waitCloudInit() error {
 // provisionConfig writes the per-distro config.json into the run's own payload
 // copy, merging this distro's facts with the shared subjects and checks.
 func (g *guest) provisionConfig() error {
-	checks := g.d.Checks
-	if checks == nil {
-		checks = g.m.Checks
+	plan := g.d.Plan
+	if plan == nil {
+		plan = g.m.Plan
 	}
 	cfg := report.Config{
 		Distro: g.d.Name, PM: g.d.PM, Family: g.d.Family, Packages: g.d.Packages,
-		Proxy: guestProxy(), Subjects: g.m.Subjects, Checks: checks,
+		Proxy: guestProxy(), Subjects: g.m.Subjects,
+		Entrypoint: g.m.Entrypoint, Plan: plan, TestSugar: g.m.TestSugar,
+		TestUser: g.m.TestUser, Audit: g.m.Audit,
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {

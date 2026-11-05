@@ -101,14 +101,14 @@ func TestRunCLI(t *testing.T) {
 }
 
 func TestIsCLIVerb(t *testing.T) {
-	for _, v := range []string{"pass", "fail", "skip", "error", "info"} {
+	for _, v := range []string{"pass", "fail", "skip", "error", "info", "detect", "sandbox", "lsm"} {
 		if !isCLIVerb(v) {
 			t.Errorf("%q should be a CLI verb", v)
 		}
 	}
-	for _, v := range []string{"-root", "run", "detect", ""} {
+	for _, v := range []string{"-root", "run", "provision", ""} {
 		if isCLIVerb(v) {
-			t.Errorf("%q should not be a CLI verb (yet)", v)
+			t.Errorf("%q should not be a CLI verb", v)
 		}
 	}
 }

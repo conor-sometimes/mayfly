@@ -25,7 +25,8 @@ var reportVerbs = map[string]oracle.Status{
 // isCLIVerb reports whether argv[1] selects the `mayfly` CLI rather than the
 // engine's run (the engine is the default when no verb matches).
 func isCLIVerb(v string) bool {
-	if v == "info" {
+	switch v {
+	case "info", "detect", "sandbox", "lsm":
 		return true
 	}
 	_, ok := reportVerbs[v]
@@ -35,6 +36,15 @@ func isCLIVerb(v string) bool {
 // runCLI handles one `mayfly <verb> ...` call and returns its process exit code.
 func runCLI(args []string) int {
 	verb, rest := args[0], args[1:]
+
+	switch verb {
+	case "detect":
+		return runDetect(args)
+	case "sandbox":
+		return runSandbox(args)
+	case "lsm":
+		return runLsm(args)
+	}
 
 	if verb == "info" {
 		if len(rest) < 2 {

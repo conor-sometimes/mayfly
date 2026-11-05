@@ -13,10 +13,10 @@ import (
 func TestMatrixTable(t *testing.T) {
 	distros := []Distro{{Name: "ubuntu-2404"}, {Name: "fedora-44"}, {Name: "rocky-9"}}
 	reports := []report.Report{
-		{Distro: "ubuntu-2404", Checks: []report.Check{{ID: "revshell", Pass: true}, {ID: "sandbox", Pass: true}}},
-		{Distro: "fedora-44", Checks: []report.Check{{ID: "revshell", Pass: false, Detail: "missed"}, {ID: "sandbox", Skip: true}}},
+		{Distro: "ubuntu-2404", Checks: []report.Check{{ID: "revshell", Status: "pass"}, {ID: "sandbox", Status: "pass"}}},
+		{Distro: "fedora-44", Checks: []report.Check{{ID: "revshell", Status: "fail", Detail: "missed"}, {ID: "sandbox", Status: "skip"}}},
 		// rocky ran revshell only (sandbox's `when` filtered it out there).
-		{Distro: "rocky-9", Checks: []report.Check{{ID: "revshell", Pass: true}}},
+		{Distro: "rocky-9", Checks: []report.Check{{ID: "revshell", Status: "pass"}}},
 	}
 	got := matrixTable(distros, reports)
 	for _, want := range []string{"distro", "revshell", "sandbox", "ubuntu-2404", "fedora-44", "rocky-9", "PASS", "FAIL", "SKIP"} {
@@ -40,7 +40,7 @@ func TestMatrixTable(t *testing.T) {
 func TestMatrixTableNoReport(t *testing.T) {
 	got := matrixTable(
 		[]Distro{{Name: "a"}, {Name: "b"}},
-		[]report.Report{{Checks: []report.Check{{ID: "x", Pass: true}}}, {Checks: nil}},
+		[]report.Report{{Checks: []report.Check{{ID: "x", Status: "pass"}}}, {Checks: nil}},
 	)
 	if !strings.Contains(got, "ERR") {
 		t.Errorf("a no-report distro should show ERR:\n%s", got)
@@ -51,7 +51,7 @@ func TestMatrixTableNoReport(t *testing.T) {
 func TestMatrixTableSingleCell(t *testing.T) {
 	if got := matrixTable(
 		[]Distro{{Name: "a"}},
-		[]report.Report{{Checks: []report.Check{{ID: "x", Pass: true}}}},
+		[]report.Report{{Checks: []report.Check{{ID: "x", Status: "pass"}}}},
 	); got != "" {
 		t.Errorf("a single cell should not render a matrix, got:\n%s", got)
 	}

@@ -54,38 +54,6 @@ func TestSubjectPackagesUnmapped(t *testing.T) {
 	}
 }
 
-// TestPkg: a command maps to its package, or falls back to the command name when
-// the distro attr does not name it.
-func TestPkg(t *testing.T) {
-	c := chk(report.Config{Packages: map[string]string{"nc": "ncat"}})
-	if got := c.pkg("nc"); got != "ncat" {
-		t.Errorf(`pkg("nc") = %q, want "ncat"`, got)
-	}
-	if got := c.pkg("curl"); got != "curl" {
-		t.Errorf(`pkg("curl") = %q, want "curl" (fallback)`, got)
-	}
-}
-
-// TestCheckTools: required is the union of non-optional checks' tools; optional
-// drops anything also required (a tool any required check needs must be present,
-// so it can never merely skip). Both are sorted and deduped.
-func TestCheckTools(t *testing.T) {
-	c := chk(report.Config{Checks: []report.CheckSpec{
-		{ID: "a", Tools: []string{"nmap"}, Optional: true},
-		{ID: "b", Tools: []string{"tcpdump", "nmap"}},
-		{ID: "c", Tools: []string{"jq"}, Optional: true},
-	}})
-	required, optional := c.checkTools()
-	if want := []string{"nmap", "tcpdump"}; !reflect.DeepEqual(required, want) {
-		t.Errorf("required = %v, want %v", required, want)
-	}
-	// nmap is required (check b), so it is not optional even though check a is;
-	// jq is the only purely-optional tool.
-	if want := []string{"jq"}; !reflect.DeepEqual(optional, want) {
-		t.Errorf("optional = %v, want %v", optional, want)
-	}
-}
-
 // TestInstallDst: a binary lands at its explicit installPath, else on PATH at
 // /usr/local/bin/<name>.
 func TestInstallDst(t *testing.T) {
