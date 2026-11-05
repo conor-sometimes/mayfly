@@ -128,7 +128,13 @@ let
   checksForDistro = d: map (m: m.manifest)
     (lib.filter (m: m.when d) (lib.attrValues checkModels));
 
-  manifest = {
+  # A manifest over an explicit distro list. Only the images of the distros it
+  # names are interpolated, so building it realizes only those images -- a
+  # per-distro manifest fetches one image, not the whole catalog. That keeps a
+  # single-distro run (`nix run .#distro-ubuntu-2404`, the CI smoke) cheap and,
+  # crucially, independent of every other distro's image: one stale catalog URL
+  # can no longer break an unrelated distro's run.
+  mkManifest = distros: {
     payload = "${payload}";
     subjects = map (m: m.manifest) subjectModels;
     checks = map (m: m.manifest) (lib.attrValues checkModels); # shared default
@@ -144,9 +150,14 @@ let
         };
         checks = checksForDistro d;
       })
-      distroList;
+      distros;
   };
-  manifestFile = pkgs.writeText "mayfly-manifest.json" (builtins.toJSON manifest);
+  mkManifestFile = distros: pkgs.writeText "mayfly-manifest.json" (builtins.toJSON (mkManifest distros));
+
+  # The full matrix manifest (every enabled distro); per-distro apps/checks below
+  # use a one-distro manifest instead.
+  manifest = mkManifest distroList;
+  manifestFile = mkManifestFile distroList;
 
   # --- the app: the host runner, wrapped with its tools and a backstop trap ---
   runtime = [ pkgs.qemu pkgs.xorriso pkgs.openssh pkgs.coreutils ];
@@ -166,7 +177,7 @@ let
       "-cloud-init-timeout ${cfg.timeouts.cloudInit}"
     ]
   );
-  mkApp = extraArgs: pkgs.writeShellApplication {
+  mkApp = mf: extraArgs: pkgs.writeShellApplication {
     name = "mayfly";
     runtimeInputs = runtime;
     text = ''
@@ -176,14 +187,16 @@ let
       # VM process group and removes this run's overlays. The runner removes each
       # work dir itself on a clean exit; this is the belt-and-braces layer.
       trap 'kill -- -$$ 2>/dev/null || true; rm -rf "$run_dir" 2>/dev/null || true' EXIT INT TERM
-      exec ${tools}/bin/matrix -manifest ${manifestFile} ${cfgArgs} ${extraArgs} "$@"
+      exec ${tools}/bin/matrix -manifest ${mf} ${cfgArgs} ${extraArgs} "$@"
     '';
   };
 
+  # Each per-distro app carries a manifest naming only its own distro, so running
+  # it fetches that one image -- not the whole catalog.
   perDistroApps = lib.listToAttrs (map
     (d: {
       name = "distro-${d.name}";
-      value = { type = "app"; program = lib.getExe (mkApp "-distro ${d.name}"); };
+      value = { type = "app"; program = lib.getExe (mkApp (mkManifestFile [ d ]) "-distro ${d.name}"); };
     })
     distroList);
 
@@ -200,7 +213,7 @@ let
 in
 {
   apps = {
-    matrix = { type = "app"; program = lib.getExe (mkApp ""); };
+    matrix = { type = "app"; program = lib.getExe (mkApp manifestFile ""); };
   } // perDistroApps;
 
   # `checks."distro-<name>"` needs a KVM builder with a relaxed sandbox (see
@@ -215,7 +228,7 @@ in
           nativeBuildInputs = runtime;
         } ''
         export MAYFLY_RUN_DIR="$(mktemp -d)"
-        ${tools}/bin/matrix -manifest ${manifestFile} -distro ${d.name} | tee "$out"
+        ${tools}/bin/matrix -manifest ${mkManifestFile [ d ]} -distro ${d.name} | tee "$out"
       '';
     })
     distroList);

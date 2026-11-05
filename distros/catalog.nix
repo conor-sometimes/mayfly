@@ -166,8 +166,12 @@ in
     opensuse-leap-16 = mkVersion suse {
       title = "openSUSE Leap 16";
       image = {
-        url = "https://downloadcontent.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.89.qcow2";
-        sha256 = "2f328a0135f9c8bf62c5ec012405169f76188ea7abf18f9c65cb0ea5374c042b";
+        # openSUSE rotates the Build number of this appliance every few days and
+        # 404s the old one, so this pin needs a periodic bump. A single-distro run
+        # no longer realizes it (per-distro manifests, lib/mkMatrix.nix), so a
+        # stale pin here only affects the full `nix run .#matrix`, not the others.
+        url = "https://downloadcontent.opensuse.org/distribution/leap/16.0/appliances/Leap-16.0-Minimal-VM.x86_64-Cloud-Build18.90.qcow2";
+        sha256 = "93dafb8f613f7085b1ce76e0be78f8c2201dc665257b8a5a19f8211c0cdc23af";
       };
     };
 
